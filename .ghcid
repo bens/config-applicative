@@ -1,1 +1,1 @@
--c="cabal new-exec -- ghci -fobject-code -isrc -itest"
+-c="cabal new-exec -- ghci -fobject-code -isrc -itest" -T ":main"

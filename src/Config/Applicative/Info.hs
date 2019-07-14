@@ -7,38 +7,38 @@ module Config.Applicative.Info
   ) where
 
 import Config.Applicative.Types
-  (IniVariable(..), Metavar(..), Sample(..), ivSection, ivVariable)
+  (Key(..), Metavar(..), Sample(..), section, variable)
 
 import Data.Char   (isAlphaNum, toUpper)
+import Data.List   (intercalate)
 import Data.Set    (Set)
 import Text.Printf (printf)
-
 
 import qualified Data.Set as Set
 
 data Info a = Info
-  { optIniVariable :: IniVariable
-  , optLongs       :: [String]
-  , optShorts      :: Set Char
-  , optEnvVar      :: String -> String
-  , optHelp        :: Maybe String
-  , optMetavar     :: Metavar
-  , optValue       :: Maybe a
-  , optSample      :: Sample a
+  { optKey     :: Key
+  , optLongs   :: [String]
+  , optShorts  :: Set Char
+  , optEnvVar  :: String -> String
+  , optHelp    :: Maybe String
+  , optMetavar :: Metavar
+  , optValue   :: Maybe a
+  , optSample  :: Sample a
   } deriving Functor
 
 optSection, optVariable :: Info a -> String
-optSection  = ivSection  . optIniVariable
-optVariable = ivVariable . optIniVariable
+optSection  = section  . optKey
+optVariable = variable . optKey
 
 -- | Build a minimal 'Info' with section and variable names.
-name :: String -> String -> Info a
-name section variable =
-  Info (IniVariable section variable) [] Set.empty envVarNm help' (Metavar "ARG") value' sample'
+name :: [String] -> String -> Info a
+name ss v =
+  Info (Key ss v) [] Set.empty envVarNm help' (Metavar "ARG") value' sample'
   where
     envVarNm prefix =
       map (\x -> if isAlphaNum x || x == '_' then x else '_')
-      $ printf "%s_%s_%s" prefix section (map toUpper variable)
+      $ printf "%s_%s_%s" prefix (intercalate "_" ss) (map toUpper v)
     help'   = Nothing
     value'  = Nothing
     sample' = Sample Nothing
@@ -80,4 +80,5 @@ sample x i = i{ optSample = Sample (Just x) }
 autoLong :: Info a -> Info a
 autoLong i = i{ optLongs = optLongs i ++ [s ++ "." ++ v]  }
   where
-    IniVariable s v = optIniVariable i
+    s = section  (optKey i)
+    v = variable (optKey i)

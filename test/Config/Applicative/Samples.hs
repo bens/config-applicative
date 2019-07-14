@@ -22,7 +22,7 @@ sample0 = pure Sample0
 newtype Sample1 = Sample1 String deriving Show
 
 sample1 :: Cfg.Option Sample1
-sample1 = Sample1 <$> Cfg.option Cfg.str (Cfg.name "XXX" "abc")
+sample1 = Sample1 <$> Cfg.option Cfg.str (Cfg.name ["XXX"] "abc")
 
 -- SAMPLE 2
 
@@ -40,17 +40,17 @@ data Sample2 = Sample2
 
 sample2 :: Cfg.Option Sample2
 sample2 = Sample2
-  <$> Cfg.option     Cfg.auto    (Cfg.name "FOO" "int")
-  <*> Cfg.optionMany Cfg.str     (Cfg.name "FOO" "strings")
-  <*> Cfg.optionSome Cfg.auto    (Cfg.name "FOO" "doubles")
-  <*> Cfg.optionMap  Cfg.boolean (Cfg.name "FOO" "enabled")
-  <*> Cfg.commands (Cfg.name "FOO" "bar")
+  <$> Cfg.option     Cfg.auto    (Cfg.name ["FOO"] "int")
+  <*> Cfg.optionMany Cfg.str     (Cfg.name ["FOO"] "strings")
+  <*> Cfg.optionSome Cfg.auto    (Cfg.name ["FOO"] "doubles")
+  <*> Cfg.optionMap  Cfg.boolean (Cfg.name ["FOO"] "enabled")
+  <*> Cfg.commands (Cfg.name ["FOO"] "bar")
         (let f Frob   = "fr...ob"
              f Wibble = "WIBBLEWIBBLE"
              f Snarf  = "snarF!!!"
-         in [ ("left",  Nothing, Left  <$> Cfg.option Cfg.str        (Cfg.name "FOO" "message"))
-            , ("right", Nothing, Right <$> Cfg.option (Cfg.enumCI f) (Cfg.name "FOO" "value"))
+         in [ ("left",  Nothing, Left  <$> Cfg.option Cfg.str        (Cfg.name ["FOO"] "message"))
+            , ("right", Nothing, Right <$> Cfg.option (Cfg.enumCI f) (Cfg.name ["FOO"] "value"))
             ])
   <*> Cfg.withIO "read-file"
         (\path -> (\contents -> Right (path, contents)) <$> readFile path)
-        (Cfg.option Cfg.str (Cfg.name "FOO" "file"))
+        (Cfg.option Cfg.str (Cfg.name ["FOO"] "file"))

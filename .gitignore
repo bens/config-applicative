@@ -2,3 +2,7 @@ test-golden/**/*.output
 /dist/
 /dist-newstyle/
 /cabal.project.local
+*.hi
+*.o
+*~
+.ghc.environment.*

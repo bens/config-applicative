@@ -6,7 +6,9 @@ module Main
   ( main
   ) where
 
-import qualified Config.Applicative         as Cfg
+import qualified Config.Applicative       as Cfg
+import qualified Config.Applicative.Parse as Cfg.P
+
 import qualified Config.Applicative.Driver  as Drv
 import qualified Config.Applicative.Samples as SUT
 
@@ -22,13 +24,14 @@ import Test.Tasty.Golden      (findByExtension, goldenVsFile)
 import Text.Printf            (printf)
 import Text.Show.Pretty       (ppShow)
 
-import qualified Data.Ini            as Ini
+import qualified Config
 import qualified Data.Text           as Text
 import qualified Data.Text.IO        as Text.IO
 import qualified Options.Applicative as Opt
 import qualified Test.Tasty          as Tasty
 import qualified Text.Parsec         as Parsec
 import qualified Text.Parsec.Text    as Parsec
+import qualified Text.PrettyPrint    as Pretty
 
 main :: IO ()
 main = do
@@ -66,9 +69,10 @@ getConfigGoldenTests prog_name env_prefix defn test_path =
       (iniText, env, args) <- case Parsec.parse parseConfigFile "" xs of
         Left err -> throwError $ printf "Failed reading input file: %s\n" (show err)
         Right x  -> pure x
-      ini <- case Ini.parseIni iniText of
-        Left err -> throwError $ printf "Failed to parse .ini file: %s\n" (show err)
-        Right x  -> pure x
+      ini <- case (iniText, Config.parse iniText) of
+        ("",       _) -> pure (Config.Sections (Config.Position 0 0 0) [])
+        (_, Left err) -> throwError $ printf "Failed to parse .cfg file: %s\n" (show err)
+        (_, Right x ) -> pure x
       setup <- Drv.prepare prog_name env_prefix defn Nothing args
       case setup of
         Drv.GetConfig _ini_path args' f -> do
@@ -76,17 +80,15 @@ getConfigGoldenTests prog_name env_prefix defn test_path =
           pure $ printf "Parsed successfully:\n%s\n" (ppShow cfg)
         Drv.DumpIni _ini_path args' f -> do
           ini' <- runParser prog_name ini env args' f
-          throwError (dumpIni ini')
+          throwError (Pretty.render (Config.pretty ini'))
         Drv.PrintExample example -> pure example
     either (writeFile outputPath) (writeFile outputPath) r
-  where
-    dumpIni = Text.unpack . Ini.printIniWith (Ini.WriteIniSettings Ini.EqualsKeySeparator)
 
 runParser
   :: (MonadIO m, MonadError String m, Show a)
   => String
-  -> Ini.Ini -> [(String, String)] -> [String]
-  -> (Ini.Ini -> [(String, String)] -> Opt.ParserInfo (IO (Either [a] b)))
+  -> Cfg.P.ConfigIn -> [(String, String)] -> [String]
+  -> (Cfg.P.ConfigIn -> [(String, String)] -> Opt.ParserInfo (IO (Either [a] b)))
   -> m b
 runParser prog_name ini env args' f = do
       m <- case Opt.execParserPure (Opt.prefs mempty) (f ini env) args' of

@@ -22,7 +22,7 @@ module Config.Applicative
     -- * Example Generation
   , Exa.genExample
     -- * Other
-  , Typ.IniVariable(..), Typ.Sample(..), Typ.Domain(..)
+  , Typ.Key(..), Typ.Sample(..), Typ.Domain(..)
   ) where
 
 import qualified Config.Applicative.Example as Exa

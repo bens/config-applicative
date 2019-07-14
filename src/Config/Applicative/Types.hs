@@ -1,23 +1,29 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GADTs         #-}
+{-# LANGUAGE RankNTypes    #-}
 
 module Config.Applicative.Types
-  ( IniVariable(..), ivSection, ivVariable
+  ( Key(..), section, variable
   , Domain(..), Metavar(..), Sample(..)
-  , Validation(..)
+    -- * Free Applicative
+ , Ap(..), liftAp, runAp, runAp_
+    -- * Validation
+  , Validation(..), bindV
   ) where
 
 import Control.Applicative ((<|>))
+import Data.Function       ((&))
+import Data.List           (intercalate)
 
 -- | Ini-file section and variable names.
-data IniVariable = IniVariable String String
+data Key = Key [String] String
   deriving (Eq, Ord, Show)
 
-ivSection :: IniVariable -> String
-ivSection (IniVariable s _) = s
+section :: Key -> String
+section (Key s _) = intercalate "." s
 
-ivVariable :: IniVariable -> String
-ivVariable (IniVariable _ v) = v
+variable :: Key -> String
+variable (Key _ v) = v
 
 -- | The domain of values of a variable, if known.
 newtype Domain = Domain (Maybe [String]) deriving (Eq, Ord, Show)
@@ -34,6 +40,35 @@ instance Semigroup (Sample a) where
 instance Monoid (Sample a) where
   mempty  = Sample Nothing
   mappend = (<>)
+
+
+--
+-- Free Applicative
+--
+
+data Ap f a where
+  Pure :: a -> Ap f a
+  Ap   :: f a -> Ap f (a -> b) -> Ap f b
+
+instance Functor (Ap f) where
+  fmap f (Pure x)   = Pure (f x)
+  fmap f (Ap mx kf) = Ap mx (fmap (f .) kf)
+
+instance Applicative (Ap f) where
+  pure = Pure
+  Pure f   <*> mx = fmap f mx
+  Ap mx kf <*> kx = Ap mx (flip <$> kf <*> kx)
+
+liftAp :: f a -> Ap f a
+liftAp x = Ap x (Pure id)
+
+runAp :: Applicative g => (forall x. f x -> g x) -> Ap f a -> g a
+runAp _ (Pure x)   = pure x
+runAp f (Ap mx kf) = (&) <$> f mx <*> runAp f kf
+
+runAp_ :: Monoid m => (forall x. f x -> m) -> Ap f a -> m
+runAp_ _ (Pure _)   = mempty
+runAp_ f (Ap mx kf) = f mx <> runAp_ f kf
 
 
 --
@@ -54,3 +89,7 @@ instance Semigroup e => Applicative (Validation e) where
   Success _  <*> Failure xe = Failure xe
   Failure fe <*> Success _  = Failure fe
   Failure fe <*> Failure xe = Failure (fe <> xe)
+
+bindV :: Validation e a -> (a -> Validation e b) -> Validation e b
+bindV (Failure e) _ = Failure e
+bindV (Success x) f = f x

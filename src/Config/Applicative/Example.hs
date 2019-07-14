@@ -19,14 +19,13 @@ import Config.Applicative.Info   (Info(..))
 import Config.Applicative.Option (F(..), Option(..))
 import Config.Applicative.Reader (Reader(..))
 import Config.Applicative.Types
-  (Domain(..), IniVariable(..), Metavar(..), Sample(..), ivSection, ivVariable)
+  (Ap, Domain(..), Key(..), Metavar(..), Sample(..), runAp_, section, variable)
 
-import Control.Applicative.Free (Ap, runAp_)
-import Data.Bifunctor           (second)
-import Data.Function            (on)
-import Data.List                (groupBy, intercalate, sort)
-import Data.Maybe               (fromMaybe, maybeToList)
-import Text.Printf              (printf)
+import Data.Bifunctor (second)
+import Data.Function  (on)
+import Data.List      (groupBy, intercalate, sort)
+import Data.Maybe     (fromMaybe, maybeToList)
+import Text.Printf    (printf)
 
 import qualified Data.Set as Set
 
@@ -59,20 +58,20 @@ data ExampleNames = ExampleNames
 
 -- | A summary of an option.
 data ExampleItem = ExampleItem
-  { exIniVariable :: IniVariable
-  , exValue       :: ExampleValue
-  , exNames       :: ExampleNames
-  , exHelp        :: Maybe String
-  , exRepeats     :: ExampleRepeats
+  { exKey      :: Key
+  , exValue    :: ExampleValue
+  , exNames    :: ExampleNames
+  , exHelp     :: Maybe String
+  , exRepeats  :: ExampleRepeats
     -- | Commands have subtrees and what will be parsed in the subtree depends
     -- on which command is used.  This dependency information can be listed in
     -- the documentation.
-  , exChildren    :: [(String, [(String, String)])]
+  , exChildren :: [(String, [(String, String)])]
   } deriving (Eq, Ord, Show)
 
 exSection, exVariable :: ExampleItem -> String
-exSection  = ivSection  . exIniVariable
-exVariable = ivVariable . exIniVariable
+exSection  = section  . exKey
+exVariable = variable . exKey
 
 -- | Generate a heavily-commented example ini configuration file based on an
 -- 'Option' definition.
@@ -98,7 +97,7 @@ extractExampleItems envVarPrefix = runAp_ go . getOption
         : concatMap (extractExampleItems envVarPrefix . Option . snd . snd) cmds
       WithIO _nm _f m -> extractExampleItems envVarPrefix (Option m)
     exampleItem i v cmds =
-      ExampleItem (optIniVariable i) v (names i cmds) (optHelp i)
+      ExampleItem (optKey i) v (names i cmds) (optHelp i)
     metavarValue ppr dom i =
       MetavarValue (Domain $ map ppr <$> dom) (optMetavar i) (ppr <$> optSample i)
     mapMetavarValue ppr dom i =
@@ -123,7 +122,7 @@ extractExampleItems envVarPrefix = runAp_ go . getOption
       where
         cmdName (nm, (chosenNm, _)) = fromMaybe (printf "%s.%s.%s" s v nm) chosenNm
         (s, v) = sv i
-    sv i = let IniVariable s v = optIniVariable i in (s, v)
+    sv i = let k = optKey i in (section k, variable k)
 
 -- Turn 'ExampleItem's into an example ini file.
 formatExampleItems :: [ExampleItem] -> String

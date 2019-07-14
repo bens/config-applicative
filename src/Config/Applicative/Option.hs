@@ -6,10 +6,10 @@ module Config.Applicative.Option where
 
 import Config.Applicative.Info   (Info(..), autoLong)
 import Config.Applicative.Reader (Reader(..))
+import Config.Applicative.Types  (Ap(..), liftAp)
 
-import Control.Applicative.Free (Ap, liftAp)
-import Data.List.NonEmpty       (NonEmpty)
-import Data.Map.Strict          (Map)
+import Data.List.NonEmpty (NonEmpty)
+import Data.Map.Strict    (Map)
 
 -- | This module is built on the free applicative functor, or
 -- 'Control.Applicative.Free.Ap' from the package @free@.
