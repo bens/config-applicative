@@ -20,6 +20,7 @@
     - GeneralizedNewtypeDeriving
     - LambdaCase
     - OverloadedStrings
+    - TupleSections
 #   - {name: CPP, within: CrossPlatform} # CPP can only be used in a given module
 
 # - flags:

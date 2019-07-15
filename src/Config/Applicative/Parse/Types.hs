@@ -28,7 +28,9 @@ data ParseError
     -- | A 'withIO' returned a 'Left' value.  First field is the 'withIO' label
     -- and the second is the message returned in the 'Left'.
   | CheckError String String
-    deriving (Eq, Ord, Show)
+    -- | Merging two Configs failed.
+  | ConfigCombineError (Maybe Key) ConfigOut ConfigOut
+    deriving (Eq, Show)
 
 newtype M a
   = M{ unM :: Compose

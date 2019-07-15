@@ -6,11 +6,13 @@ module Main
   ( main
   ) where
 
-import qualified Config.Applicative       as Cfg
-import qualified Config.Applicative.Parse as Cfg.P
+import Config.Applicative.Samples (sample0, sample1, sample2)
+import Test.Utils                 (getGoldenTests)
 
-import qualified Config.Applicative.Driver  as Drv
-import qualified Config.Applicative.Samples as SUT
+import qualified Config.Applicative            as Cfg
+import qualified Config.Applicative.Driver     as Drv
+import qualified Config.Applicative.Parse      as Cfg.P
+import qualified Config.Applicative.Parse.Test as Parse
 
 import Control.Applicative    (many, some, (<|>))
 import Control.Monad.Except   (MonadError, runExceptT, throwError)
@@ -40,26 +42,15 @@ main = do
 
 getTests :: IO TestTree
 getTests = do
-  sample0 <- getConfigGoldenTests "sample0" "SAMPLE0" SUT.sample0 "test-golden/sample0-empty"
-  sample1 <- getConfigGoldenTests "sample1" "SAMPLE1" SUT.sample1 "test-golden/sample1-single-option"
-  sample2 <- getConfigGoldenTests "sample2" "SAMPLE2" SUT.sample2 "test-golden/sample2-tutorial"
-  pure $ testGroup "ALL"
-    [sample0, sample1, sample2]
+  parsing <- Parse.getTests
+  sample0 <- getConfigGoldenTests "sample0" "SAMPLE0" sample0 "test-golden/sample0-empty"
+  sample1 <- getConfigGoldenTests "sample1" "SAMPLE1" sample1 "test-golden/sample1-single-option"
+  sample2 <- getConfigGoldenTests "sample2" "SAMPLE2" sample2 "test-golden/sample2-tutorial"
+  pure $ testGroup "ALL" [parsing, sample0, sample1, sample2]
 
 
 -- GOLDEN TESTS
 --
-
-getGoldenTests :: String -> FilePath -> (FilePath -> FilePath -> IO ()) -> IO TestTree
-getGoldenTests ext goldenDir runit = do
-  inpFiles <- sort <$> findByExtension [ext] goldenDir
-  pure $ testGroup goldenDir
-    [ goldenVsFile (takeBaseName inpPath) goldenPath outputPath
-        (runit inpPath outputPath)
-    | inpPath <- inpFiles
-    , let goldenPath = replaceExtension inpPath ".golden"
-          outputPath = replaceExtension inpPath ".output"
-    ]
 
 getConfigGoldenTests :: Show a => String -> String -> Cfg.Option a -> FilePath -> IO TestTree
 getConfigGoldenTests prog_name env_prefix defn test_path =
@@ -78,9 +69,14 @@ getConfigGoldenTests prog_name env_prefix defn test_path =
         Drv.GetConfig _ini_path args' f -> do
           cfg <- runParser prog_name ini env args' f
           pure $ printf "Parsed successfully:\n%s\n" (ppShow cfg)
-        Drv.DumpIni _ini_path args' f -> do
+        Drv.Dump _ini_path args' f -> do
           ini' <- runParser prog_name ini env args' f
-          throwError (Pretty.render (Config.pretty ini'))
+          let style = Pretty.style
+                { Pretty.lineLength     = 80
+                , Pretty.ribbonsPerLine = 1.0
+                }
+              pretty = Config.pretty ini' Pretty.$+$ Pretty.text ""
+          throwError (Pretty.renderStyle style pretty)
         Drv.PrintExample example -> pure example
     either (writeFile outputPath) (writeFile outputPath) r
 

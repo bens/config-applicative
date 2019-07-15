@@ -1,2 +1,2 @@
-[XXX]
-abc=foo bar quux
+XXX:
+  abc: "foo bar quux"

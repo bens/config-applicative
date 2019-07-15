@@ -1,7 +1,6 @@
-{-# LANGUAGE GADTs                      #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE GADTs             #-}
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 --
 -- PARSING CONFIGURATION
@@ -36,6 +35,7 @@
 
 module Config.Applicative.Parse
   ( mkParser, ParseError(..), ConfigIn, ConfigOut
+  , combineConfigs
   ) where
 
 import Config.Applicative.Info        (Info(..), optSection, optVariable)
@@ -44,32 +44,33 @@ import Config.Applicative.Parse.Types
   (ConfigIn, ConfigOut, M(..), ParseError(..))
 import Config.Applicative.Reader      (Reader(..), lookupReader, str)
 import Config.Applicative.Types
-  (Ap(..), Domain(..), Key(..), Metavar(..), Sample(..), Validation(..), runAp,
-  section, variable)
+  (Ap(..), Key(..), Metavar(..), Validation(..), runAp)
 
 import qualified Config.Applicative.Parse.Config as Cfg
 import qualified Config.Applicative.Parse.Env    as Env
 
 import Control.Applicative   (empty, some, (<**>), (<|>))
-import Data.Bifunctor        (bimap)
-import Data.Foldable         (find, fold, toList)
+import Control.Monad         (foldM)
+import Data.Foldable         (toList)
 import Data.Functor.Compose  (Compose(Compose, getCompose))
 import Data.Functor.Const    (Const(Const))
 import Data.Functor.Identity (Identity(Identity, runIdentity))
 import Data.Functor.Product  (Product(Pair))
-import Data.List             (uncons, union)
+import Data.List             (intersect, uncons)
 import Data.Map.Strict       (Map)
-import Data.Maybe            (fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe            (catMaybes, fromMaybe, maybeToList)
+import Data.Set              (Set)
 import Data.Text             (Text)
-import Data.Traversable      (for)
 import Text.Printf           (printf)
 
 import qualified Config
-import qualified Data.HashMap.Strict as HM
 import qualified Data.List.NonEmpty  as NE
-import qualified Data.Map            as Map
+import qualified Data.Map.Strict     as Map
+import qualified Data.Set            as Set
 import qualified Data.Text           as Text
 import qualified Options.Applicative as Opt
+
+import Debug.Trace
 
 -- | Wrap in an 'M'.
 cc :: Opt.Parser (IO ([ConfigOut], Validation [ParseError] a)) -> M a
@@ -89,43 +90,74 @@ liftPsr psr = cc ((\x -> pure (mempty, pure x)) <$> psr)
 liftErrs :: [ParseError] -> M a
 liftErrs es = cc (pure (pure (mempty, Failure es)))
 
-mkConfig :: (Text -> Text) -> Key -> String -> ConfigOut
-mkConfig varF (Key ss v) val = foldr f (Config.Text () (Text.pack val)) ss'
+combineConfigs :: ConfigOut -> ConfigOut -> Either ParseError ConfigOut
+combineConfigs = go []
+  where
+    mkKey []     = Nothing
+    mkKey (x:xs) = Just (Key (map Text.unpack (reverse xs)) (Text.unpack x))
+    go ks (Config.Sections () xs) (Config.Sections () ys) =
+      Config.Sections () <$> combined
+      where
+        xsMap = Map.fromList [(Config.sectionName x, x) | x <- xs]
+        ysMap = Map.fromList [(Config.sectionName y, y) | y <- ys]
+        commonKeys = Map.keysSet xsMap `Set.intersection` Map.keysSet ysMap
+        combined = sequenceA $
+          [ if xNm `Map.member` ysMap
+              then let Config.Section () yNm yVal = ysMap Map.! xNm
+                   in Config.Section () xNm <$> go (xNm:ks) xVal yVal
+              else Right x
+          | x@(Config.Section () xNm xVal) <- xs
+          ] ++
+          catMaybes
+            [ if yNm `Map.member` xsMap then Nothing else Just (Right y)
+            | y@(Config.Section () yNm yVal) <- ys
+            ]
+    go _ (Config.Sections _ []) y = Right y
+    go _ x (Config.Sections _ []) = Right x
+    go ks x@Config.Sections{} y = Left (ConfigCombineError (mkKey ks) x y)
+    go ks x y@Config.Sections{} = Left (ConfigCombineError (mkKey ks) x y)
+    go ks x y = if x == y then Right x else Left (ConfigCombineError (mkKey ks) x y)
+
+wrapConfig :: Key -> ConfigOut -> ConfigOut
+wrapConfig (Key ss v) val = foldr f val ss'
   where
     f s x = Config.Sections () [Config.Section () s x]
-    ss'   = map Text.pack ss ++ [varF (Text.pack v)]
-
-combineConfigs :: [ConfigOut] -> ConfigOut
-combineConfigs  [] = Config.Sections () []
-combineConfigs [c] = c
-combineConfigs cs  = undefined
--- combineConfigs xs = Ini.Ini
---   (foldr (\i hm -> HM.unionWith (++) (Config.iniSections i) hm) HM.empty xs)
---   (foldr (\i gs -> union (Config.iniGlobals i) gs) [] xs)
+    ss'   = map Text.pack (ss ++ [v])
 
 -- | If we have a 'Reader' and an 'Info' for 'a', then record the value in our
 -- output 'Config'.
 recording1 :: Reader a -> Info a -> M a -> M a
-recording1 rdr i = fmap runIdentity . recordingN rdr i . fmap Identity
+recording1 (Reader _psr ppr _dom) i (M (Compose (Compose m))) = M (Compose (Compose (fmap f <$> m)))
+  where
+    f (Pair (Const cfgs) (Failure e)) = Pair (Const cfgs) (Failure e)
+    f (Pair (Const cfgs) (Success x)) = Pair (Const (cfgs ++ [cfg])) (Success x)
+      where
+        cfg = wrapConfig (optKey i) $ Config.Text () (Text.pack (ppr x))
 
 -- | If we have a 'Reader' and an 'Info' for 'a', then record a collection of
 -- values in our output 'Config'.
 recordingN :: Foldable f => Reader a -> Info a -> M (f a) -> M (f a)
 recordingN (Reader _psr ppr _dom) i (M (Compose (Compose m))) = M (Compose (Compose (fmap f <$> m)))
   where
-    f (Pair (Const inis) (Failure e))  = Pair (Const inis) (Failure e)
-    f (Pair (Const inis) (Success xs)) = Pair (Const (inis ++ map g (toList xs))) (Success xs)
-      where g = mkConfig id (optKey i) . ppr
+    f (Pair (Const cfgs) (Failure e))  = Pair (Const cfgs) (Failure e)
+    f (Pair (Const cfgs) (Success xs)) = Pair (Const (cfgs ++ [cfg])) (Success xs)
+      where
+        cfg = wrapConfig (optKey i) $
+          Config.List () (map (Config.Text () . Text.pack . ppr) (toList xs))
 
 -- | If we have a 'Reader' and an 'Info' for 'a', then record a 'Map' of values in
 -- our output 'Config'.
 recordingKV :: Reader a -> Info (String, a) -> M (Map String a) -> M (Map String a)
 recordingKV (Reader _psr ppr _dom) i (M (Compose (Compose m))) = M (Compose (Compose (fmap f <$> m)))
   where
-    f (Pair (Const inis) (Failure e)) = Pair (Const inis) (Failure e)
-    f (Pair (Const inis) (Success x)) = Pair (Const (inis ++ map g (Map.toList x))) (Success x)
+    f (Pair (Const cfgs) (Failure e)) = Pair (Const cfgs) (Failure e)
+    f (Pair (Const cfgs) (Success x)) = Pair (Const (cfgs ++ [cfg])) (Success x)
       where
-        g (k, v) = mkConfig (<> "." <> Text.pack k) (optKey i) (ppr v)
+        cfg = wrapConfig (optKey i) $
+          Config.Sections ()
+            [ Config.Section () (Text.pack k) (Config.Text () (Text.pack (ppr v)))
+            | (k,v) <- Map.toList x
+            ]
 
 -- | Returns a command-line parser for `optparse-applicative` package, which if
 -- it successfully parses will produce an IO action, which when run gives back
@@ -136,24 +168,26 @@ mkParser
   -> [(String, String)]             -- ^ Process environment
   -> Option a                       -- ^ Options
   -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
-mkParser envVarPrefix ini env =
+mkParser envVarPrefix cfg env =
   unpackM
-  . runAp (mkParserOption envVarPrefix ini packedEnv)
+  . runAp (mkParserOption envVarPrefix cfg env)
   . getOption
   where
-    packedEnv = map (bimap Text.pack Text.pack) env
     unpackM :: M a -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
     unpackM (M m) = fmap f <$> getCompose (getCompose m)
       where
-        f (Pair (Const inis) (Success x)) = Right (x, combineConfigs inis)
-        f (Pair (Const    _) (Failure e)) = Left e
+        f (Pair (Const cfgs) (Success x)) =
+          case foldM combineConfigs (Config.Sections () []) cfgs of
+            Left e    -> Left [e]
+            Right out -> Right (x, out)
+        f (Pair (Const _) (Failure e)) = Left e
 
 -- | This converts interprets a single carrier value of 'F' as an 'M'.  'runAp'
 -- is used to combine them over an entire 'Ap F' structure.
 --
 -- Note that it has to recurse with 'runAp' in the 'Commands' and 'WithIO'
 -- cases.
-mkParserOption :: String -> ConfigIn -> [(Text, Text)] -> F a -> M a
+mkParserOption :: String -> ConfigIn -> [(String, String)] -> F a -> M a
 mkParserOption envVarPrefix ini env = go
   where
     go :: F a -> M a
@@ -221,82 +255,37 @@ mkParserOption envVarPrefix ini env = go
       , let nm = fromMaybe (printf "%s.%s.%s" (optSection i) (optVariable i) cmdNm) chosenNmMay
       ]
 
+-- FIXME: update comments
 -- | Attempt to parse a value from an 'Config' file and the environment.
 findValue
-  :: String -> ConfigIn -> [(Text, Text)] -> Reader a -> Info String
+  :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
   -> Validation [ParseError] (Maybe a)
-findValue envVarPrefix cfg env rdr@(Reader psr _ppr _dom) i =
-  case lookup (Text.pack envKey) env <|> Cfg.findOne cfg (optKey i) of
-    Nothing -> pure Nothing
-    Just t  -> case psr (Text.unpack t) of
-      Left e  -> Failure [mkError rdr i e]
-      Right x -> pure (Just x)
-  where
-    envKey = optEnvVar i envVarPrefix
+findValue envVarPrefix cfg env rdr info =
+  flip (<|>) <$> Cfg.findOne rdr info cfg <*> Env.findOne rdr info envVarPrefix env
 
+-- FIXME: update comments
 -- | Attempt to parse any number of values from an 'Config' file and the
--- environment.  Supports the _0, _1, and _NONE environment variables.
+-- environment.  Supports the _0, _1, etc., and _NONE environment variables.
 findValues
-  :: String -> ConfigIn -> [(Text, Text)] -> Reader a -> Info String
+  :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
   -> Validation [ParseError] [a]
-findValues envVarPrefix cfg env rdr@(Reader psr _ppr _dom) i =
-  case envValues <|> Cfg.findList cfg (optKey i) of
-    Nothing -> pure []
-    Just ts -> for ts $ \t -> case psr (Text.unpack t) of
-      Left e  -> Failure [mkError rdr i e]
-      Right x -> pure x
+findValues envVarPrefix cfg env rdr info =
+  f <$> Cfg.findMany rdr info cfg <*> Env.findMany rdr info envVarPrefix env
   where
-    envKeys     = map (Text.pack . printf "%s_%d" (optEnvVar i envVarPrefix)) [(0::Int)..]
-    envKeyEmpty = Text.pack $ printf "%s_NONE" (optEnvVar i envVarPrefix)
-    envValues   = case (takeJusts $ map (`lookup` env) envKeys, lookup envKeyEmpty env) of
-      ([], Nothing) -> Nothing
-      (xs, Nothing) -> Just xs
-      ([], Just  _) -> Just []
-      ( _, Just  _) -> Nothing
+    f fromCfg fromEnv = fromMaybe [] (fromEnv <|> fromCfg)
 
+-- FIXME: update comments
 -- | Attempt to parse any number of values from <variable>.<key> style variables
 -- from an 'Config' file and the environment.  Each environment variable has as its
 -- suffix its key in the key-value.  An empty map can be defined by the _NONE
 -- environment variable.
 findValuesMap
-  :: String -> ConfigIn -> [(Text, Text)] -> Reader a -> Info String
+  :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
   -> Validation [ParseError] (Map String a)
-findValuesMap envVarPrefix cfg env rdr@(Reader psr _ppr _dom) i =
-  case envValues <|> iniValues of
-    Nothing -> pure Map.empty
-    Just ts -> for ts $ \t -> case psr (Text.unpack t) of
-      Left e  -> Failure [mkError rdr i e]
-      Right x -> pure x
+findValuesMap envVarPrefix cfg env rdr info =
+  f <$> Cfg.findMap rdr info cfg <*> Env.findMap rdr info envVarPrefix env
   where
-    section     = Text.pack (optSection i)
-    keys        = undefined -- prefixedBy "." (Text.pack (optVariable i)) $ fold $ Config.keys iniSection ini
-    envKeys     = prefixedBy "_" (Text.pack (optEnvVar i envVarPrefix)) $ map fst env
-    envKeyEmpty = Text.pack $ printf "%s_NONE" (optEnvVar i envVarPrefix)
-    -- iniValues   = Just $ lookupWith iniKeys (\v -> findHead (Config.lookupValue iniSection v ini))
-    iniValues   = Cfg.findMap cfg (optKey i)
-    envValues   = case (lookupWith envKeys (`lookup` env), lookup envKeyEmpty env) of
-      (m, Nothing) | Map.null m -> Nothing
-                   | otherwise  -> Just m
-      (m, Just  _) | Map.null m -> Just m
-                   | otherwise  -> Nothing
-    lookupWith :: [(Text, Text)] -> (Text -> Maybe Text) -> Map String Text
-    lookupWith pairs f = maybe Map.empty fold . findHead $ for pairs $ \(v, k) ->
-      Map.singleton (Text.unpack k) <$> f v
-
--- mkError :: Reader a -> Info String -> String -> ParseError
--- mkError (Reader _psr ppr dom) i msg =
---   ParseError (optKey i) msg (optSample i) (Domain $ map ppr <$> dom)
-
-prefixedBy :: Text -> Text -> [Text] -> [(Text, Text)]
-prefixedBy sep p = mapMaybe $ \k -> (,) k <$> Text.stripPrefix (p <> sep) k
-
-findHead :: Foldable f => f a -> Maybe a
-findHead = find (const True)
-
-takeJusts :: [Maybe a] -> [a]
-takeJusts []          = []
-takeJusts (Nothing:_) = []
-takeJusts (Just x:xs) = x:takeJusts xs
+    f fromCfg fromEnv = fromMaybe mempty (fromEnv <|> fromCfg)
 
 longO :: Opt.HasName x => Info o -> Opt.Mod x a
 longO i = foldMap Opt.long (optLongs i)

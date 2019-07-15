@@ -45,11 +45,9 @@ library
   build-depends:
     base                 >=4.11 && <5,
     config-value         ^>=0.6.3,
-    containers           >=0.5  && <0.7,
-    ini                  ^>=0.4,
+    containers           >=0.5 && <0.7,
     optparse-applicative ^>=0.14,
-    text                 ^>=1.2,
-    unordered-containers ^>=0.2,
+    text                 ^>=1.2
 
 test-suite tests
   type:                exitcode-stdio-1.0
@@ -59,19 +57,23 @@ test-suite tests
   main-is:             Main.hs
   other-modules:
     Config.Applicative.Driver
+    Config.Applicative.Parse.Test
     Config.Applicative.Samples
+    Test.Utils
   build-depends:
     config-applicative,
     base,
     config-value,
     containers,
+    optparse-applicative,
+    text,
+
     filepath             ^>=1.4,
-    ini,
+    hedgehog             ^>=1.0,
     mtl                  ^>=2.2,
-    optparse-applicative ^>=0.14,
     parsec               ^>=3.1,
     pretty               ^>=1.1,
     pretty-show          ^>=1.9,
     tasty                ^>=1.2,
-    tasty-golden         ^>=2.3,
-    text
+    tasty-hedgehog       ^>=1.0,
+    tasty-golden         ^>=2.3

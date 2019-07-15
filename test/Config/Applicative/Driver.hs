@@ -4,7 +4,7 @@ module Config.Applicative.Driver
   ( ParseSetup(..), ConfigParser, prepare
   ) where
 
-import Control.Applicative  (empty, many, optional, (<**>), (<|>))
+import Control.Applicative  (empty, liftA2, many, optional, (<**>), (<|>))
 import Control.Monad.Except (MonadError, MonadIO, throwError)
 
 import qualified Config.Applicative       as Cfg
@@ -19,7 +19,7 @@ type ConfigParser a
 
 data ParseSetup a
   = GetConfig [FilePath] [String] (ConfigParser a)
-  | DumpIni   [FilePath] [String] (ConfigParser Cfg.P.ConfigOut)
+  | Dump      [FilePath] [String] (ConfigParser Cfg.P.ConfigOut)
   | PrintExample String
 
 extraOpts :: Maybe FilePath -> Opt.Parser (Maybe FilePath, Bool, Bool)
@@ -57,8 +57,8 @@ prepare
   -> [String]
   -> m (ParseSetup a)
 prepare prog_name env_prefix defn configPathMay args = do
-  let psr = (,) <$> extraOpts configPathMay
-                <*> many (Opt.argument Opt.str mempty)
+  let psr = liftA2 (,) (extraOpts configPathMay)
+                       (many (Opt.argument Opt.str mempty))
   let info  = Opt.info psr Opt.forwardOptions
   let prefs = Opt.prefs mempty
   r <- case Opt.execParserPure prefs info args of
@@ -74,7 +74,7 @@ prepare prog_name env_prefix defn configPathMay args = do
   let goDump ini env = fmap (fmap snd) <$> psrInfo ini env
   case r of
     ((    _ini_path,  True, _dump),     _) -> pure (PrintExample (Cfg.genExample env_prefix defn))
-    ((      Nothing, False,  True), args') -> pure (DumpIni   defaultPaths args' goDump)
+    ((      Nothing, False,  True), args') -> pure (Dump      defaultPaths args' goDump)
     ((      Nothing, False, False), args') -> pure (GetConfig defaultPaths args' goCfg)
-    ((Just ini_path, False,  True), args') -> pure (DumpIni   [ini_path]   args' goDump)
+    ((Just ini_path, False,  True), args') -> pure (Dump      [ini_path]   args' goDump)
     ((Just ini_path, False, False), args') -> pure (GetConfig [ini_path]   args' goCfg)
