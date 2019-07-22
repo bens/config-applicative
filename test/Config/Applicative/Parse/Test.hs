@@ -6,7 +6,8 @@ module Config.Applicative.Parse.Test
   , genValue, genSections, genNumber, genFloating, genText, genAtom, genList
   ) where
 
-import qualified Config.Applicative.Parse as SUT
+import qualified Config.Applicative.Parse             as SUT
+import qualified Config.Applicative.Parse.ConfigValue as SUT
 
 import Control.Monad       (unless)
 import Data.Bifunctor      (first)

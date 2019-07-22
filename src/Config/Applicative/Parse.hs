@@ -35,7 +35,6 @@
 
 module Config.Applicative.Parse
   ( mkParser, ParseError(..), ConfigIn, ConfigOut
-  , combineConfigs
   ) where
 
 import Config.Applicative.Info        (Info(..), optSection, optVariable)
@@ -46,8 +45,9 @@ import Config.Applicative.Reader      (Reader(..), lookupReader, str)
 import Config.Applicative.Types
   (Ap(..), Key(..), Metavar(..), Validation(..), runAp)
 
-import qualified Config.Applicative.Parse.Config as Cfg
-import qualified Config.Applicative.Parse.Env    as Env
+import qualified Config.Applicative.Parse.ConfigValue as Cfg
+import qualified Config.Applicative.Parse.Env         as Env
+import qualified Config.Applicative.Parse.Ini         as Ini
 
 import Control.Applicative   (empty, some, (<**>), (<|>))
 import Control.Monad         (foldM)
@@ -70,8 +70,6 @@ import qualified Data.Set            as Set
 import qualified Data.Text           as Text
 import qualified Options.Applicative as Opt
 
-import Debug.Trace
-
 -- | Wrap in an 'M'.
 cc :: Opt.Parser (IO ([ConfigOut], Validation [ParseError] a)) -> M a
 cc = M . Compose . Compose . fmap (fmap (\(inis, val) -> Pair (Const inis) val))
@@ -89,75 +87,6 @@ liftPsr psr = cc ((\x -> pure (mempty, pure x)) <$> psr)
 -- | Lift a list of failures into an 'M' 'a'.
 liftErrs :: [ParseError] -> M a
 liftErrs es = cc (pure (pure (mempty, Failure es)))
-
-combineConfigs :: ConfigOut -> ConfigOut -> Either ParseError ConfigOut
-combineConfigs = go []
-  where
-    mkKey []     = Nothing
-    mkKey (x:xs) = Just (Key (map Text.unpack (reverse xs)) (Text.unpack x))
-    go ks (Config.Sections () xs) (Config.Sections () ys) =
-      Config.Sections () <$> combined
-      where
-        xsMap = Map.fromList [(Config.sectionName x, x) | x <- xs]
-        ysMap = Map.fromList [(Config.sectionName y, y) | y <- ys]
-        commonKeys = Map.keysSet xsMap `Set.intersection` Map.keysSet ysMap
-        combined = sequenceA $
-          [ if xNm `Map.member` ysMap
-              then let Config.Section () yNm yVal = ysMap Map.! xNm
-                   in Config.Section () xNm <$> go (xNm:ks) xVal yVal
-              else Right x
-          | x@(Config.Section () xNm xVal) <- xs
-          ] ++
-          catMaybes
-            [ if yNm `Map.member` xsMap then Nothing else Just (Right y)
-            | y@(Config.Section () yNm yVal) <- ys
-            ]
-    go _ (Config.Sections _ []) y = Right y
-    go _ x (Config.Sections _ []) = Right x
-    go ks x@Config.Sections{} y = Left (ConfigCombineError (mkKey ks) x y)
-    go ks x y@Config.Sections{} = Left (ConfigCombineError (mkKey ks) x y)
-    go ks x y = if x == y then Right x else Left (ConfigCombineError (mkKey ks) x y)
-
-wrapConfig :: Key -> ConfigOut -> ConfigOut
-wrapConfig (Key ss v) val = foldr f val ss'
-  where
-    f s x = Config.Sections () [Config.Section () s x]
-    ss'   = map Text.pack (ss ++ [v])
-
--- | If we have a 'Reader' and an 'Info' for 'a', then record the value in our
--- output 'Config'.
-recording1 :: Reader a -> Info a -> M a -> M a
-recording1 (Reader _psr ppr _dom) i (M (Compose (Compose m))) = M (Compose (Compose (fmap f <$> m)))
-  where
-    f (Pair (Const cfgs) (Failure e)) = Pair (Const cfgs) (Failure e)
-    f (Pair (Const cfgs) (Success x)) = Pair (Const (cfgs ++ [cfg])) (Success x)
-      where
-        cfg = wrapConfig (optKey i) $ Config.Text () (Text.pack (ppr x))
-
--- | If we have a 'Reader' and an 'Info' for 'a', then record a collection of
--- values in our output 'Config'.
-recordingN :: Foldable f => Reader a -> Info a -> M (f a) -> M (f a)
-recordingN (Reader _psr ppr _dom) i (M (Compose (Compose m))) = M (Compose (Compose (fmap f <$> m)))
-  where
-    f (Pair (Const cfgs) (Failure e))  = Pair (Const cfgs) (Failure e)
-    f (Pair (Const cfgs) (Success xs)) = Pair (Const (cfgs ++ [cfg])) (Success xs)
-      where
-        cfg = wrapConfig (optKey i) $
-          Config.List () (map (Config.Text () . Text.pack . ppr) (toList xs))
-
--- | If we have a 'Reader' and an 'Info' for 'a', then record a 'Map' of values in
--- our output 'Config'.
-recordingKV :: Reader a -> Info (String, a) -> M (Map String a) -> M (Map String a)
-recordingKV (Reader _psr ppr _dom) i (M (Compose (Compose m))) = M (Compose (Compose (fmap f <$> m)))
-  where
-    f (Pair (Const cfgs) (Failure e)) = Pair (Const cfgs) (Failure e)
-    f (Pair (Const cfgs) (Success x)) = Pair (Const (cfgs ++ [cfg])) (Success x)
-      where
-        cfg = wrapConfig (optKey i) $
-          Config.Sections ()
-            [ Config.Section () (Text.pack k) (Config.Text () (Text.pack (ppr v)))
-            | (k,v) <- Map.toList x
-            ]
 
 -- | Returns a command-line parser for `optparse-applicative` package, which if
 -- it successfully parses will produce an IO action, which when run gives back
@@ -177,7 +106,7 @@ mkParser envVarPrefix cfg env =
     unpackM (M m) = fmap f <$> getCompose (getCompose m)
       where
         f (Pair (Const cfgs) (Success x)) =
-          case foldM combineConfigs (Config.Sections () []) cfgs of
+          case foldM Cfg.combineConfigs (Config.Sections () []) cfgs of
             Left e    -> Left [e]
             Right out -> Right (x, out)
         f (Pair (Const _) (Failure e)) = Left e
@@ -195,25 +124,31 @@ mkParserOption envVarPrefix ini env = go
       One rdr@(Reader _psr ppr _dom) i ->
         case findValue envVarPrefix ini env rdr (fmap ppr i) of
           Failure es -> liftErrs es
-          Success x  -> recording1 rdr i (liftPsr (one x i rdr <|> maybe empty pure (optValue i)))
+          Success x  -> Cfg.recording1 rdr i
+            (liftPsr (one x i rdr <|> maybe empty pure (optValue i)))
       Optional rdr@(Reader _psr ppr _dom) i ->
         case findValue envVarPrefix ini env rdr (fmap ppr i) of
           Failure es -> liftErrs es
-          Success xM -> recordingN rdr i (liftPsr ((Just <$> one xM i rdr) <|> pure Nothing))
+          Success xM -> Cfg.recordingN rdr i
+            (liftPsr ((Just <$> one xM i rdr) <|> pure Nothing))
       Many rdr@(Reader _psr ppr _dom) i ->
         case findValues envVarPrefix ini env rdr (fmap ppr i) of
           Failure es -> liftErrs es
-          Success xs -> recordingN rdr i (liftPsr (more i rdr <|> pure xs))
+          Success xs -> Cfg.recordingN rdr i
+            (liftPsr (more i rdr <|> pure xs))
       Some rdr@(Reader _psr ppr _dom) i ->
         case findValues envVarPrefix ini env rdr (fmap ppr i) of
           Failure es -> liftErrs es
-          Success [] -> recordingN rdr i (liftPsr (ne <$>  some (one Nothing i rdr)))
-          Success xs -> recordingN rdr i (liftPsr (ne <$> (some (one Nothing i rdr) <|> pure xs)))
+          Success [] -> Cfg.recordingN rdr i
+            (liftPsr (ne <$>  some (one Nothing i rdr)))
+          Success xs -> Cfg.recordingN rdr i
+            (liftPsr (ne <$> (some (one Nothing i rdr) <|> pure xs)))
         where ne = maybe (error "unreachable") (uncurry (NE.:|)) . uncons
       Map rdr@(Reader _psr ppr _dom) i ->
         case findValuesMap envVarPrefix ini env rdr (fmap (\(k,v) -> k ++ "=" ++ ppr v) i) of
           Failure es -> liftErrs es
-          Success m  -> recordingKV rdr i (liftPsr (Map.fromList <$> kv i rdr <|> pure m))
+          Success m  -> Cfg.recordingKV rdr i
+            (liftPsr (Map.fromList <$> kv i rdr <|> pure m))
       Commands i cmds ->
         case findValue envVarPrefix ini env (lookupReader cmds) i of
           Failure es                  -> liftErrs es
@@ -250,7 +185,7 @@ mkParserOption envVarPrefix ini env = go
     flags :: [(String, (Maybe String, Ap F a))] -> Info String -> M a
     flags cmds i = cc $ Opt.subparser $ mconcat
       [ Opt.command nm
-          (Opt.info (uu (recording1 str i (pure cmdNm) *> runAp go m') <**> Opt.helper) mempty)
+          (Opt.info (uu (Cfg.recording1 str i (pure cmdNm) *> runAp go m') <**> Opt.helper) mempty)
       | (cmdNm, (chosenNmMay, m')) <- cmds
       , let nm = fromMaybe (printf "%s.%s.%s" (optSection i) (optVariable i) cmdNm) chosenNmMay
       ]
