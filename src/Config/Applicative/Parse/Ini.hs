@@ -25,9 +25,10 @@ sv info = (Text.pack (section k), Text.pack (variable k))
   where k = optKey info
 
 findOne
-  :: Reader a -> Info String
-  -> Ini -> Validation [ParseError] (Maybe a)
-findOne rdr@(Reader psr _ppr _dom) info ini =
+  :: Ini
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe a)
+findOne ini rdr@(Reader psr _ppr _dom) info =
   case Ini.lookupArray s v ini of
     Left err  -> undefined
     Right [t] -> case psr (Text.unpack t) of
@@ -39,9 +40,10 @@ findOne rdr@(Reader psr _ppr _dom) info ini =
     (s,v) = sv info
 
 findMany
-  :: Reader a -> Info String
-  -> Ini -> Validation [ParseError] (Maybe [a])
-findMany rdr@(Reader psr _ppr _dom) info ini =
+  :: Ini
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe [a])
+findMany ini rdr@(Reader psr _ppr _dom) info =
   case Ini.lookupArray s v ini of
     Left err  -> undefined
     Right ts -> case traverse (psr . Text.unpack) ts of
@@ -51,9 +53,10 @@ findMany rdr@(Reader psr _ppr _dom) info ini =
     (s,v) = sv info
 
 findMap
-  :: Reader a -> Info String
-  -> Ini -> Validation [ParseError] (Maybe (Map String a))
-findMap rdr@(Reader psr _ppr _dom) info ini =
+  :: Ini
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe (Map String a))
+findMap ini rdr@(Reader psr _ppr _dom) info =
   undefined
   where
     (s,v) = sv info

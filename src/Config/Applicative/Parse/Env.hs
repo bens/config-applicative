@@ -21,10 +21,10 @@ import qualified Data.Map.Strict as Map
 type EnvVar = String
 
 findOne
-  :: Reader a -> Info String
-  -> String
-  -> [(EnvVar, String)] -> Validation [ParseError] (Maybe a)
-findOne rdr@(Reader psr _ppr _dom) info prefix env =
+  :: String -> [(EnvVar, String)]
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe a)
+findOne prefix env rdr@(Reader psr _ppr _dom) info =
   case lookup key env of
     Nothing -> pure Nothing
     Just t  -> case psr t of
@@ -34,10 +34,10 @@ findOne rdr@(Reader psr _ppr _dom) info prefix env =
     key = optEnvVar info prefix
 
 findMany
-  :: Reader a -> Info String
-  -> String
-  -> [(EnvVar, String)] -> Validation [ParseError] (Maybe [a])
-findMany rdr@(Reader psr _ppr _dom) info prefix env =
+  :: String -> [(EnvVar, String)]
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe [a])
+findMany prefix env rdr@(Reader psr _ppr _dom) info =
   case values of
     Nothing -> pure Nothing
     Just ts -> fmap sequenceA $ for (zip keys ts) $ \(envVar,t) ->
@@ -52,10 +52,10 @@ findMany rdr@(Reader psr _ppr _dom) info prefix env =
       (xs,  Just _) -> xs <$ guard (null xs)
 
 findMap
-  :: Reader a -> Info String
-  -> String
-  -> [(EnvVar, String)] -> Validation [ParseError] (Maybe (Map String a))
-findMap rdr@(Reader psr _ppr _dom) info prefix env =
+  :: String -> [(EnvVar, String)]
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe (Map String a))
+findMap prefix env rdr@(Reader psr _ppr _dom) info =
   case values of
     Nothing -> pure Nothing
     Just xs -> fmap (Just . Map.fromList) $ for xs $ \(k, (envVar, t)) ->

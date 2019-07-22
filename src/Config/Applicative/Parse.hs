@@ -43,31 +43,25 @@ import Config.Applicative.Parse.Types
   (ConfigIn, ConfigOut, M(..), ParseError(..))
 import Config.Applicative.Reader      (Reader(..), lookupReader, str)
 import Config.Applicative.Types
-  (Ap(..), Key(..), Metavar(..), Validation(..), runAp)
+  (Ap(..), Metavar(..), Validation(..), runAp)
 
 import qualified Config.Applicative.Parse.ConfigValue as Cfg
 import qualified Config.Applicative.Parse.Env         as Env
 import qualified Config.Applicative.Parse.Ini         as Ini
 
-import Control.Applicative   (empty, some, (<**>), (<|>))
-import Control.Monad         (foldM)
-import Data.Foldable         (toList)
-import Data.Functor.Compose  (Compose(Compose, getCompose))
-import Data.Functor.Const    (Const(Const))
-import Data.Functor.Identity (Identity(Identity, runIdentity))
-import Data.Functor.Product  (Product(Pair))
-import Data.List             (intersect, uncons)
-import Data.Map.Strict       (Map)
-import Data.Maybe            (catMaybes, fromMaybe, maybeToList)
-import Data.Set              (Set)
-import Data.Text             (Text)
-import Text.Printf           (printf)
+import Control.Applicative  (empty, some, (<**>), (<|>))
+import Control.Monad        (foldM)
+import Data.Functor.Compose (Compose(Compose, getCompose))
+import Data.Functor.Const   (Const(Const))
+import Data.Functor.Product (Product(Pair))
+import Data.List            (uncons)
+import Data.Map.Strict      (Map)
+import Data.Maybe           (fromMaybe, maybeToList)
+import Text.Printf          (printf)
 
 import qualified Config
 import qualified Data.List.NonEmpty  as NE
 import qualified Data.Map.Strict     as Map
-import qualified Data.Set            as Set
-import qualified Data.Text           as Text
 import qualified Options.Applicative as Opt
 
 -- | Wrap in an 'M'.
@@ -99,7 +93,7 @@ mkParser
   -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
 mkParser envVarPrefix cfg env =
   unpackM
-  . runAp (mkParserOption envVarPrefix cfg env)
+  . runAp (mkParserOption cfg envVarPrefix env)
   . getOption
   where
     unpackM :: M a -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
@@ -116,50 +110,52 @@ mkParser envVarPrefix cfg env =
 --
 -- Note that it has to recurse with 'runAp' in the 'Commands' and 'WithIO'
 -- cases.
-mkParserOption :: String -> ConfigIn -> [(String, String)] -> F a -> M a
-mkParserOption envVarPrefix ini env = go
+mkParserOption :: ConfigIn -> String -> [(String, String)] -> F a -> M a
+mkParserOption cfg envVarPrefix env = go
   where
     go :: F a -> M a
     go = \case
-      One rdr@(Reader _psr ppr _dom) i ->
-        case findValue envVarPrefix ini env rdr (fmap ppr i) of
+      One rdr@(Reader _psr ppr _dom) info ->
+        case findValue cfg envVarPrefix env rdr (fmap ppr info) of
           Failure es -> liftErrs es
-          Success x  -> Cfg.recording1 rdr i
-            (liftPsr (one x i rdr <|> maybe empty pure (optValue i)))
-      Optional rdr@(Reader _psr ppr _dom) i ->
-        case findValue envVarPrefix ini env rdr (fmap ppr i) of
+          Success x  -> Cfg.recording1 rdr info
+            (liftPsr (one x info rdr <|> maybe empty pure (optValue info)))
+      Optional rdr@(Reader _psr ppr _dom) info ->
+        case findValue cfg envVarPrefix env rdr (fmap ppr info) of
           Failure es -> liftErrs es
-          Success xM -> Cfg.recordingN rdr i
-            (liftPsr ((Just <$> one xM i rdr) <|> pure Nothing))
-      Many rdr@(Reader _psr ppr _dom) i ->
-        case findValues envVarPrefix ini env rdr (fmap ppr i) of
+          Success xM -> Cfg.recordingN rdr info
+            (liftPsr ((Just <$> one xM info rdr) <|> pure Nothing))
+      Many rdr@(Reader _psr ppr _dom) info ->
+        case findValues cfg envVarPrefix env rdr (fmap ppr info) of
           Failure es -> liftErrs es
-          Success xs -> Cfg.recordingN rdr i
-            (liftPsr (more i rdr <|> pure xs))
-      Some rdr@(Reader _psr ppr _dom) i ->
-        case findValues envVarPrefix ini env rdr (fmap ppr i) of
+          Success xs -> Cfg.recordingN rdr info
+            (liftPsr (more info rdr <|> pure xs))
+      Some rdr@(Reader _psr ppr _dom) info ->
+        case findValues cfg envVarPrefix env rdr (fmap ppr info) of
           Failure es -> liftErrs es
-          Success [] -> Cfg.recordingN rdr i
-            (liftPsr (ne <$>  some (one Nothing i rdr)))
-          Success xs -> Cfg.recordingN rdr i
-            (liftPsr (ne <$> (some (one Nothing i rdr) <|> pure xs)))
+          Success [] -> Cfg.recordingN rdr info
+            (liftPsr (ne <$>  some (one Nothing info rdr)))
+          Success xs -> Cfg.recordingN rdr info
+            (liftPsr (ne <$> (some (one Nothing info rdr) <|> pure xs)))
         where ne = maybe (error "unreachable") (uncurry (NE.:|)) . uncons
-      Map rdr@(Reader _psr ppr _dom) i ->
-        case findValuesMap envVarPrefix ini env rdr (fmap (\(k,v) -> k ++ "=" ++ ppr v) i) of
-          Failure es -> liftErrs es
-          Success m  -> Cfg.recordingKV rdr i
-            (liftPsr (Map.fromList <$> kv i rdr <|> pure m))
-      Commands i cmds ->
-        case findValue envVarPrefix ini env (lookupReader cmds) i of
+      Map rdr@(Reader _psr ppr _dom) info ->
+        let xxx = (\(k,v) -> k ++ "=" ++ ppr v) <$> info
+        in case findValuesMap envVarPrefix cfg env rdr xxx of
+             Failure es -> liftErrs es
+             Success m  -> Cfg.recordingKV rdr info
+               (liftPsr (Map.fromList <$> kv info rdr <|> pure m))
+      Commands info cmds ->
+        case findValue cfg envVarPrefix env (lookupReader cmds) info of
           Failure es                  -> liftErrs es
-          Success Nothing             -> flags cmds i
-          Success (Just (_, (_, m'))) -> cc (uu (flags cmds i) <|> uu (runAp go m'))
+          Success Nothing             -> flags cmds info
+          Success (Just (_, (_, m'))) -> cc (uu (flags cmds info) <|> uu (runAp go m'))
       WithIO nm f m' ->
         let g (inis, Failure es) = pure (inis, Failure es)
             g (inis, Success x)  = f x >>= \case
               Left e  -> pure (inis, Failure [CheckError nm e])
               Right y -> pure (inis, Success y)
         in cc ((>>= g) <$> uu (runAp go m'))
+
     -- Build a command line parser to read a single value.
     one :: Maybe a -> Info a -> Reader a -> Opt.Parser a
     one dflt i (Reader psr ppr _dom) =
@@ -193,21 +189,25 @@ mkParserOption envVarPrefix ini env = go
 -- FIXME: update comments
 -- | Attempt to parse a value from an 'Config' file and the environment.
 findValue
-  :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
+  :: ConfigIn -> String -> [(String, String)]
+  -> Reader a -> Info String
   -> Validation [ParseError] (Maybe a)
-findValue envVarPrefix cfg env rdr info =
-  flip (<|>) <$> Cfg.findOne rdr info cfg <*> Env.findOne rdr info envVarPrefix env
+findValue cfg envVarPrefix env rdr info =
+  flip (<|>)
+    <$> Cfg.findOne cfg rdr info
+    <*> Env.findOne envVarPrefix env rdr info
 
 -- FIXME: update comments
 -- | Attempt to parse any number of values from an 'Config' file and the
 -- environment.  Supports the _0, _1, etc., and _NONE environment variables.
 findValues
-  :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
+  :: ConfigIn -> String -> [(String, String)]
+  -> Reader a -> Info String
   -> Validation [ParseError] [a]
-findValues envVarPrefix cfg env rdr info =
-  f <$> Cfg.findMany rdr info cfg <*> Env.findMany rdr info envVarPrefix env
-  where
-    f fromCfg fromEnv = fromMaybe [] (fromEnv <|> fromCfg)
+findValues cfg envVarPrefix env rdr info =
+  (\x y -> fromMaybe [] (y <|> x))
+    <$> Cfg.findMany cfg rdr info
+    <*> Env.findMany envVarPrefix env rdr info
 
 -- FIXME: update comments
 -- | Attempt to parse any number of values from <variable>.<key> style variables
@@ -218,9 +218,9 @@ findValuesMap
   :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
   -> Validation [ParseError] (Map String a)
 findValuesMap envVarPrefix cfg env rdr info =
-  f <$> Cfg.findMap rdr info cfg <*> Env.findMap rdr info envVarPrefix env
-  where
-    f fromCfg fromEnv = fromMaybe mempty (fromEnv <|> fromCfg)
+  (\x y -> fromMaybe mempty (y <|> x))
+    <$> Cfg.findMap cfg rdr info
+    <*> Env.findMap envVarPrefix env rdr info
 
 longO :: Opt.HasName x => Info o -> Opt.Mod x a
 longO i = foldMap Opt.long (optLongs i)

@@ -37,7 +37,7 @@ library
   other-modules:
     Config.Applicative.Info
     Config.Applicative.Option
-    Config.Applicative.Parse.Config
+    Config.Applicative.Parse.ConfigValue
     Config.Applicative.Parse.Env
     Config.Applicative.Parse.Ini
     Config.Applicative.Parse.Types

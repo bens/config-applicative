@@ -28,9 +28,10 @@ import qualified Data.Set  as Set
 import qualified Data.Text as Text
 
 findOne
-  :: Reader a -> Info String
-  -> ConfigIn -> Validation [ParseError] (Maybe a)
-findOne rdr@(Reader psr _ppr _dom) info cfg =
+  :: ConfigIn
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe a)
+findOne cfg rdr@(Reader psr _ppr _dom) info =
   bindV (seek rdr key cfg) (traverse f)
   where
     key = optKey info
@@ -40,9 +41,10 @@ findOne rdr@(Reader psr _ppr _dom) info cfg =
     p v = either (badParse rdr key v) pure . psr . Text.unpack
 
 findMany
-  :: Reader a -> Info String
-  -> ConfigIn -> Validation [ParseError] (Maybe [a])
-findMany rdr@(Reader psr _ppr _dom) info cfg =
+  :: ConfigIn
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe [a])
+findMany cfg rdr@(Reader psr _ppr _dom) info =
   bindV (seek rdr key cfg) (traverse f)
   where
     key = optKey info
@@ -54,9 +56,10 @@ findMany rdr@(Reader psr _ppr _dom) info cfg =
     p v = either (badParse rdr key v) pure . psr . Text.unpack
 
 findMap
-  :: Reader a -> Info String
-  -> ConfigIn -> Validation [ParseError] (Maybe (Map String a))
-findMap rdr@(Reader psr _ppr _dom) info cfg =
+  :: ConfigIn
+  -> Reader a -> Info String
+  -> Validation [ParseError] (Maybe (Map String a))
+findMap cfg rdr@(Reader psr _ppr _dom) info =
   bindV (seek rdr key cfg) (traverse f)
   where
     key = optKey info
