@@ -1,6 +1,7 @@
-{-# LANGUAGE GADTs             #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 --
 -- PARSING CONFIGURATION
@@ -40,7 +41,7 @@ module Config.Applicative.Parse
 import Config.Applicative.Info        (Info(..), optSection, optVariable)
 import Config.Applicative.Option      (F(..), Option(..))
 import Config.Applicative.Parse.Types
-  (ConfigIn, ConfigOut, M(..), ParseError(..))
+  (ConfigIn, ConfigOut, M(..), P(..), ParseError(..))
 import Config.Applicative.Reader      (Reader(..), lookupReader, str)
 import Config.Applicative.Types
   (Ap(..), Metavar(..), Validation(..), runAp)
@@ -93,9 +94,11 @@ mkParser
   -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
 mkParser envVarPrefix cfg env =
   unpackM
-  . runAp (mkParserOption cfg envVarPrefix env)
+  . runAp (mkParserOption psr)
   . getOption
   where
+    psr :: P M
+p    psr = undefined
     unpackM :: M a -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
     unpackM (M m) = fmap f <$> getCompose (getCompose m)
       where
@@ -110,28 +113,25 @@ mkParser envVarPrefix cfg env =
 --
 -- Note that it has to recurse with 'runAp' in the 'Commands' and 'WithIO'
 -- cases.
-mkParserOption :: ConfigIn -> String -> [(String, String)] -> F a -> M a
-mkParserOption cfg envVarPrefix env = go
+mkParserOption :: P M -> F a -> M a
+mkParserOption psr = go
   where
     go :: F a -> M a
     go = \case
       One rdr@(Reader _psr ppr _dom) info ->
-        case findValue cfg envVarPrefix env rdr (fmap ppr info) of
-          Failure es -> liftErrs es
-          Success x  -> Cfg.recording1 rdr info
-            (liftPsr (one x info rdr <|> maybe empty pure (optValue info)))
+        Cfg.recording1 rdr info (findValue rdr (fmap ppr info) psr)
       Optional rdr@(Reader _psr ppr _dom) info ->
-        case findValue cfg envVarPrefix env rdr (fmap ppr info) of
+        case findValue rdr (fmap ppr info) _ of
           Failure es -> liftErrs es
           Success xM -> Cfg.recordingN rdr info
             (liftPsr ((Just <$> one xM info rdr) <|> pure Nothing))
       Many rdr@(Reader _psr ppr _dom) info ->
-        case findValues cfg envVarPrefix env rdr (fmap ppr info) of
+        case findValues rdr (fmap ppr info) _ of
           Failure es -> liftErrs es
           Success xs -> Cfg.recordingN rdr info
             (liftPsr (more info rdr <|> pure xs))
       Some rdr@(Reader _psr ppr _dom) info ->
-        case findValues cfg envVarPrefix env rdr (fmap ppr info) of
+        case findValues rdr (fmap ppr info) _ of
           Failure es -> liftErrs es
           Success [] -> Cfg.recordingN rdr info
             (liftPsr (ne <$>  some (one Nothing info rdr)))
@@ -139,13 +139,13 @@ mkParserOption cfg envVarPrefix env = go
             (liftPsr (ne <$> (some (one Nothing info rdr) <|> pure xs)))
         where ne = maybe (error "unreachable") (uncurry (NE.:|)) . uncons
       Map rdr@(Reader _psr ppr _dom) info ->
-        let xxx = (\(k,v) -> k ++ "=" ++ ppr v) <$> info
-        in case findValuesMap envVarPrefix cfg env rdr xxx of
+        let info' = (\(k,v) -> k ++ "=" ++ ppr v) <$> info
+        in case findValuesMap rdr info' _ of
              Failure es -> liftErrs es
              Success m  -> Cfg.recordingKV rdr info
                (liftPsr (Map.fromList <$> kv info rdr <|> pure m))
       Commands info cmds ->
-        case findValue cfg envVarPrefix env (lookupReader cmds) info of
+        case findValue (lookupReader cmds) info _ of
           Failure es                  -> liftErrs es
           Success Nothing             -> flags cmds info
           Success (Just (_, (_, m'))) -> cc (uu (flags cmds info) <|> uu (runAp go m'))
@@ -189,13 +189,12 @@ mkParserOption cfg envVarPrefix env = go
 -- FIXME: update comments
 -- | Attempt to parse a value from an 'Config' file and the environment.
 findValue
-  :: ConfigIn -> String -> [(String, String)]
-  -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe a)
-findValue cfg envVarPrefix env rdr info =
-  flip (<|>)
-    <$> Cfg.findOne cfg rdr info
-    <*> Env.findOne envVarPrefix env rdr info
+  :: Reader a -> Info String
+  -> P m -> m a
+findValue rdr info p = undefined
+  -- flip (<|>)
+  --   <$> Cfg.findOne cfg rdr info
+  --   <*> Env.findOne envVarPrefix env rdr info
 
 -- FIXME: update comments
 -- | Attempt to parse any number of values from an 'Config' file and the
@@ -203,11 +202,11 @@ findValue cfg envVarPrefix env rdr info =
 findValues
   :: ConfigIn -> String -> [(String, String)]
   -> Reader a -> Info String
-  -> Validation [ParseError] [a]
-findValues cfg envVarPrefix env rdr info =
-  (\x y -> fromMaybe [] (y <|> x))
-    <$> Cfg.findMany cfg rdr info
-    <*> Env.findMany envVarPrefix env rdr info
+  -> P m -> m [a]
+findValues rdr info p = undefined
+  -- (\x y -> fromMaybe [] (y <|> x))
+  --   <$> Cfg.findMany cfg rdr info
+  --   <*> Env.findMany envVarPrefix env rdr info
 
 -- FIXME: update comments
 -- | Attempt to parse any number of values from <variable>.<key> style variables
@@ -215,12 +214,13 @@ findValues cfg envVarPrefix env rdr info =
 -- suffix its key in the key-value.  An empty map can be defined by the _NONE
 -- environment variable.
 findValuesMap
-  :: String -> ConfigIn -> [(String, String)] -> Reader a -> Info String
-  -> Validation [ParseError] (Map String a)
-findValuesMap envVarPrefix cfg env rdr info =
-  (\x y -> fromMaybe mempty (y <|> x))
-    <$> Cfg.findMap cfg rdr info
-    <*> Env.findMap envVarPrefix env rdr info
+  :: String -> ConfigIn -> [(String, String)]
+  -> Reader a -> Info String
+  -> P m -> m (Map String a)
+findValuesMap rdr info p = undefined
+  -- (\x y -> fromMaybe mempty (y <|> x))
+  --   <$> Cfg.findMap cfg rdr info
+  --   <*> Env.findMap envVarPrefix env rdr info
 
 longO :: Opt.HasName x => Info o -> Opt.Mod x a
 longO i = foldMap Opt.long (optLongs i)

@@ -1,11 +1,12 @@
 {-# LANGUAGE TupleSections #-}
 
 module Config.Applicative.Parse.Env
-  ( findMany, findOne, findMap
+  ( parser
+  , findMany, findOne, findMap
   ) where
 
 import Config.Applicative.Info        (Info(..))
-import Config.Applicative.Parse.Types (ParseError(..))
+import Config.Applicative.Parse.Types (P(P), ParseError(..))
 import Config.Applicative.Reader      (Reader(..))
 import Config.Applicative.Types       (Domain(..), Sample(..), Validation(..))
 
@@ -20,11 +21,15 @@ import qualified Data.Map.Strict as Map
 
 type EnvVar = String
 
+parser :: String -> [(EnvVar, String)] -> P (Validation [ParseError])
+parser prefix env =
+  P (findOne prefix env) (findMany prefix env) (findMap prefix env)
+
 findOne
   :: String -> [(EnvVar, String)]
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe a)
-findOne prefix env rdr@(Reader psr _ppr _dom) info =
+  -> Maybe a -> Validation [ParseError] (Maybe a)
+findOne prefix env rdr@(Reader psr _ppr _dom) info _ =
   case lookup key env of
     Nothing -> pure Nothing
     Just t  -> case psr t of
@@ -36,8 +41,8 @@ findOne prefix env rdr@(Reader psr _ppr _dom) info =
 findMany
   :: String -> [(EnvVar, String)]
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe [a])
-findMany prefix env rdr@(Reader psr _ppr _dom) info =
+  -> Maybe [a] -> Validation [ParseError] (Maybe [a])
+findMany prefix env rdr@(Reader psr _ppr _dom) info _ =
   case values of
     Nothing -> pure Nothing
     Just ts -> fmap sequenceA $ for (zip keys ts) $ \(envVar,t) ->
@@ -54,8 +59,8 @@ findMany prefix env rdr@(Reader psr _ppr _dom) info =
 findMap
   :: String -> [(EnvVar, String)]
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe (Map String a))
-findMap prefix env rdr@(Reader psr _ppr _dom) info =
+  -> Maybe (Map String a) -> Validation [ParseError] (Maybe (Map String a))
+findMap prefix env rdr@(Reader psr _ppr _dom) info _ =
   case values of
     Nothing -> pure Nothing
     Just xs -> fmap (Just . Map.fromList) $ for xs $ \(k, (envVar, t)) ->

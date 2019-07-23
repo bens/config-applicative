@@ -1,11 +1,12 @@
 module Config.Applicative.Parse.Ini
-  ( findOne, findMany, findMap
+  ( parser
+  , findOne, findMany, findMap
   , combineConfigs
   , recording1, recordingN, recordingKV
   ) where
 
 import Config.Applicative.Info        (Info(..))
-import Config.Applicative.Parse.Types (M(..), ParseError(..))
+import Config.Applicative.Parse.Types (M(..), P(P), ParseError(..))
 import Config.Applicative.Reader      (Reader(..))
 import Config.Applicative.Types
   (Domain(..), Key(..), Sample(..), Validation(..), bindV, section, variable)
@@ -24,11 +25,15 @@ sv :: Info a -> (Text, Text)
 sv info = (Text.pack (section k), Text.pack (variable k))
   where k = optKey info
 
+parser :: Ini -> P (Validation [ParseError])
+parser ini =
+  P (findOne ini) (findMany ini) (findMap ini)
+
 findOne
   :: Ini
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe a)
-findOne ini rdr@(Reader psr _ppr _dom) info =
+  -> Maybe a -> Validation [ParseError] (Maybe a)
+findOne ini rdr@(Reader psr _ppr _dom) info _ =
   case Ini.lookupArray s v ini of
     Left err  -> undefined
     Right [t] -> case psr (Text.unpack t) of
@@ -42,8 +47,8 @@ findOne ini rdr@(Reader psr _ppr _dom) info =
 findMany
   :: Ini
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe [a])
-findMany ini rdr@(Reader psr _ppr _dom) info =
+  -> Maybe [a] -> Validation [ParseError] (Maybe [a])
+findMany ini rdr@(Reader psr _ppr _dom) info _ =
   case Ini.lookupArray s v ini of
     Left err  -> undefined
     Right ts -> case traverse (psr . Text.unpack) ts of
@@ -55,8 +60,8 @@ findMany ini rdr@(Reader psr _ppr _dom) info =
 findMap
   :: Ini
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe (Map String a))
-findMap ini rdr@(Reader psr _ppr _dom) info =
+  -> Maybe (Map String a) -> Validation [ParseError] (Maybe (Map String a))
+findMap ini rdr@(Reader psr _ppr _dom) info _ =
   undefined
   where
     (s,v) = sv info

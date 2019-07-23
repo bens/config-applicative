@@ -1,37 +1,41 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Config.Applicative.Parse.ConfigValue
-  ( findMany, findOne, findMap
+  ( parser
+  , findMany, findOne, findMap
   , combineConfigs
   , recording1, recordingN, recordingKV
   ) where
 
 import Config.Applicative.Info        (Info(..))
 import Config.Applicative.Parse.Types
-  (ConfigIn, ConfigOut, M(..), ParseError(..))
+  (ConfigIn, ConfigOut, M(..), P(P), ParseError(..))
 import Config.Applicative.Reader      (Reader(..))
 import Config.Applicative.Types
   (Domain(..), Key(..), Sample(..), Validation(..), bindV)
 
-import Data.Foldable         (find, toList)
-import Data.Functor.Compose  (Compose(Compose, getCompose))
-import Data.Functor.Const    (Const(Const))
-import Data.Functor.Identity (Identity(Identity, runIdentity))
-import Data.Functor.Product  (Product(Pair))
-import Data.Map              (Map)
-import Data.Maybe            (catMaybes, fromMaybe, maybeToList)
-import Data.Traversable      (for)
+import Data.Foldable        (find, toList)
+import Data.Functor.Compose (Compose(Compose))
+import Data.Functor.Const   (Const(Const))
+import Data.Functor.Product (Product(Pair))
+import Data.Map             (Map)
+import Data.Maybe           (catMaybes)
+import Data.Traversable     (for)
 
 import qualified Config
 import qualified Data.Map  as Map
 import qualified Data.Set  as Set
 import qualified Data.Text as Text
 
+parser :: ConfigIn -> P (Validation [ParseError])
+parser cfg =
+  P (findOne cfg) (findMany cfg) (findMap cfg)
+
 findOne
   :: ConfigIn
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe a)
-findOne cfg rdr@(Reader psr _ppr _dom) info =
+  -> Maybe a -> Validation [ParseError] (Maybe a)
+findOne cfg rdr@(Reader psr _ppr _dom) info _ =
   bindV (seek rdr key cfg) (traverse f)
   where
     key = optKey info
@@ -43,8 +47,8 @@ findOne cfg rdr@(Reader psr _ppr _dom) info =
 findMany
   :: ConfigIn
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe [a])
-findMany cfg rdr@(Reader psr _ppr _dom) info =
+  -> Maybe [a] -> Validation [ParseError] (Maybe [a])
+findMany cfg rdr@(Reader psr _ppr _dom) info _ =
   bindV (seek rdr key cfg) (traverse f)
   where
     key = optKey info
@@ -58,8 +62,8 @@ findMany cfg rdr@(Reader psr _ppr _dom) info =
 findMap
   :: ConfigIn
   -> Reader a -> Info String
-  -> Validation [ParseError] (Maybe (Map String a))
-findMap cfg rdr@(Reader psr _ppr _dom) info =
+  -> Maybe (Map String a) -> Validation [ParseError] (Maybe (Map String a))
+findMap cfg rdr@(Reader psr _ppr _dom) info _ =
   bindV (seek rdr key cfg) (traverse f)
   where
     key = optKey info

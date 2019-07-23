@@ -1,16 +1,22 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 
 module Config.Applicative.Parse.Types
   ( ConfigIn, ConfigOut
   , ParseError(..)
   , M(..)
+  , P(..), composeP, natP
   ) where
 
-import Config.Applicative.Types (Domain(..), Key(..), Sample(..), Validation)
+import Config.Applicative.Info   (Info)
+import Config.Applicative.Reader (Reader)
+import Config.Applicative.Types  (Domain(..), Key(..), Sample(..), Validation)
 
-import Data.Functor.Compose (Compose)
+import Data.Functor.Compose (Compose(Compose))
 import Data.Functor.Const   (Const)
 import Data.Functor.Product (Product)
+import Data.Map.Strict      (Map)
 
 import qualified Config
 import qualified Options.Applicative as Opt
@@ -41,3 +47,24 @@ newtype M a
                 ) a
      }
   deriving (Functor, Applicative)
+
+
+data P m = P
+  { pOne  :: forall a. Reader a -> Info String
+                    -> Maybe a -> m (Maybe a)
+  , pMany :: forall a. Reader a -> Info String
+                    -> Maybe [a] -> m (Maybe [a])
+  , pMap  :: forall a. Reader a -> Info String
+                    -> Maybe (Map String a) -> m (Maybe (Map String a))
+  }
+
+composeP :: Functor n => P m -> P n -> P (Compose n m)
+composeP (P af ag ah) (P bf bg bh) = P cf cg ch
+  where
+    cf rdr info = Compose . fmap (af rdr info) . bf rdr info
+    cg rdr info = Compose . fmap (ag rdr info) . bg rdr info
+    ch rdr info = Compose . fmap (ah rdr info) . bh rdr info
+
+natP :: (forall a. n a -> m a) -> P n -> P m
+natP nt (P f g h) =
+  P (\r i -> nt . f r i) (\r i -> nt . g r i) (\r i -> nt . h r i)
