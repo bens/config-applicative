@@ -98,7 +98,7 @@ mkParser envVarPrefix cfg env =
   . getOption
   where
     psr :: P M
-p    psr = undefined
+    psr = undefined
     unpackM :: M a -> Opt.Parser (IO (Either [ParseError] (a, ConfigOut)))
     unpackM (M m) = fmap f <$> getCompose (getCompose m)
       where
