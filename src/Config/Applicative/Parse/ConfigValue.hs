@@ -24,7 +24,6 @@ import Data.Traversable     (for)
 
 import qualified Config
 import qualified Data.Map  as Map
-import qualified Data.Set  as Set
 import qualified Data.Text as Text
 
 parser :: ConfigIn -> P (Validation [ParseError])
@@ -113,17 +112,16 @@ combineConfigs = go []
       where
         xsMap = Map.fromList [(Config.sectionName x, x) | x <- xs]
         ysMap = Map.fromList [(Config.sectionName y, y) | y <- ys]
-        commonKeys = Map.keysSet xsMap `Set.intersection` Map.keysSet ysMap
         combined = sequenceA $
           [ if xNm `Map.member` ysMap
-              then let Config.Section () yNm yVal = ysMap Map.! xNm
+              then let Config.Section () _ yVal = ysMap Map.! xNm
                    in Config.Section () xNm <$> go (xNm:ks) xVal yVal
               else Right x
           | x@(Config.Section () xNm xVal) <- xs
           ] ++
           catMaybes
             [ if yNm `Map.member` xsMap then Nothing else Just (Right y)
-            | y@(Config.Section () yNm yVal) <- ys
+            | y@(Config.Section () yNm _) <- ys
             ]
     go _ (Config.Sections _ []) y = Right y
     go _ x (Config.Sections _ []) = Right x
