@@ -7,7 +7,7 @@ module Config.Applicative.Parse.Env
 
 import Config.Applicative.Info        (Info(..))
 import Config.Applicative.Parse.Types (P(P), ParseError(..))
-import Config.Applicative.Reader      (Reader(..))
+import Config.Applicative.Reader      (Parsed(..), Reader(..))
 import Config.Applicative.Types       (Domain(..), Sample(..), Validation(..))
 
 import Control.Monad    (guard)
@@ -27,28 +27,28 @@ parser prefix env =
 
 findOne
   :: String -> [(EnvVar, String)]
-  -> Reader a -> Info String
+  -> Reader a -> Info a
   -> Maybe a -> Validation [ParseError] (Maybe a)
-findOne prefix env rdr@(Reader psr _ppr _dom) info _ =
+findOne prefix env rdr@(Reader psr _dom) info _ =
   case lookup key env of
     Nothing -> pure Nothing
-    Just t  -> case psr t of
-      Right x -> pure (Just x)
-      Left e  -> badParse rdr key e
+    Just s  -> case psr s of
+      Left e             -> badParse rdr key e
+      Right (Parsed x _) -> pure (Just x)
   where
     key = optEnvVar info prefix
 
 findMany
   :: String -> [(EnvVar, String)]
-  -> Reader a -> Info String
+  -> Reader a -> Info a
   -> Maybe [a] -> Validation [ParseError] (Maybe [a])
-findMany prefix env rdr@(Reader psr _ppr _dom) info _ =
+findMany prefix env rdr@(Reader psr _dom) info _ =
   case values of
     Nothing -> pure Nothing
     Just ts -> fmap sequenceA $ for (zip keys ts) $ \(envVar,t) ->
       case psr t of
-        Right x -> pure (Just x)
-        Left e  -> badParse rdr envVar e
+        Left e             -> badParse rdr envVar e
+        Right (Parsed x _) -> pure (Just x)
   where
     keys    = map (printf "%s_%d" (optEnvVar info prefix)) [(0::Int)..]
     keyNone = printf "%s_NONE" (optEnvVar info prefix)
@@ -58,15 +58,15 @@ findMany prefix env rdr@(Reader psr _ppr _dom) info _ =
 
 findMap
   :: String -> [(EnvVar, String)]
-  -> Reader a -> Info String
+  -> Reader a -> Info a
   -> Maybe (Map String a) -> Validation [ParseError] (Maybe (Map String a))
-findMap prefix env rdr@(Reader psr _ppr _dom) info _ =
+findMap prefix env rdr@(Reader psr _dom) info _ =
   case values of
     Nothing -> pure Nothing
     Just xs -> fmap (Just . Map.fromList) $ for xs $ \(k, (envVar, t)) ->
       case psr t of
-        Right x -> pure (k, x)
-        Left e  -> badParse rdr envVar e
+        Left e             -> badParse rdr envVar e
+        Right (Parsed x _) -> pure (k, x)
   where
     keys    = prefixedBy "_" (optEnvVar info prefix) $ map fst env
     keyNone = printf "%s_NONE" (optEnvVar info prefix)
@@ -81,8 +81,8 @@ lookupWith :: (a -> Maybe b) -> [(a, k)] -> [(k, (a, b))]
 lookupWith f = mapMaybe (\(a,k) -> (k,) . (a,) <$> f a)
 
 badParse :: Reader r -> EnvVar -> String -> Validation [ParseError] a
-badParse (Reader _ ppr dom) envVar e =
-  Failure [EnvParseError envVar e (Sample Nothing) (Domain (map ppr <$> dom))]
+badParse (Reader _ dom) envVar e =
+  Failure [EnvParseError envVar e (Sample Nothing) (Domain (map fst <$> dom))]
 
 mapMaybe' :: (a -> Maybe b) -> [a] -> [b]
 mapMaybe' _ [] = []

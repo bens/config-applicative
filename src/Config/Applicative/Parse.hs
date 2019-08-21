@@ -41,8 +41,9 @@ module Config.Applicative.Parse
 import Config.Applicative.Info        (Info(..), optSection, optVariable)
 import Config.Applicative.Option      (F(..), Option(..))
 import Config.Applicative.Parse.Types
-  (ConfigIn, ConfigOut, M(..), P(..), ParseError(..))
-import Config.Applicative.Reader      (Reader(..), lookupReader, str)
+  (ConfigIn, ConfigOut, M(..), P(..), ParseError(..), natP)
+import Config.Applicative.Reader
+  (Parsed(..), Reader(..), lookupReader, str)
 import Config.Applicative.Types
   (Ap(..), Metavar(..), Validation(..), runAp)
 
@@ -51,7 +52,7 @@ import qualified Config.Applicative.Parse.Env         as Env
 import qualified Config.Applicative.Parse.Ini         as Ini
 
 import Control.Applicative  (empty, some, (<**>), (<|>))
-import Control.Monad        (foldM)
+import Control.Monad        (foldM, join)
 import Data.Functor.Compose (Compose(Compose, getCompose))
 import Data.Functor.Const   (Const(Const))
 import Data.Functor.Product (Product(Pair))
@@ -118,59 +119,61 @@ mkParserOption psr = go
   where
     go :: F a -> M a
     go = \case
-      One rdr@(Reader _psr ppr _dom) info ->
-        Cfg.recording1 rdr info (findValue rdr (fmap ppr info) psr)
-      Optional rdr@(Reader _psr ppr _dom) info ->
-        case findValue rdr (fmap ppr info) _ of
-          Failure es -> liftErrs es
-          Success xM -> Cfg.recordingN rdr info
-            (liftPsr ((Just <$> one xM info rdr) <|> pure Nothing))
-      Many rdr@(Reader _psr ppr _dom) info ->
-        case findValues rdr (fmap ppr info) _ of
-          Failure es -> liftErrs es
-          Success xs -> Cfg.recordingN rdr info
-            (liftPsr (more info rdr <|> pure xs))
-      Some rdr@(Reader _psr ppr _dom) info ->
-        case findValues rdr (fmap ppr info) _ of
-          Failure es -> liftErrs es
-          Success [] -> Cfg.recordingN rdr info
-            (liftPsr (ne <$>  some (one Nothing info rdr)))
-          Success xs -> Cfg.recordingN rdr info
-            (liftPsr (ne <$> (some (one Nothing info rdr) <|> pure xs)))
-        where ne = maybe (error "unreachable") (uncurry (NE.:|)) . uncons
-      Map rdr@(Reader _psr ppr _dom) info ->
-        let info' = (\(k,v) -> k ++ "=" ++ ppr v) <$> info
-        in case findValuesMap rdr info' _ of
-             Failure es -> liftErrs es
-             Success m  -> Cfg.recordingKV rdr info
-               (liftPsr (Map.fromList <$> kv info rdr <|> pure m))
-      Commands info cmds ->
-        case findValue (lookupReader cmds) info _ of
-          Failure es                  -> liftErrs es
-          Success Nothing             -> flags cmds info
-          Success (Just (_, (_, m'))) -> cc (uu (flags cmds info) <|> uu (runAp go m'))
-      WithIO nm f m' ->
-        let g (inis, Failure es) = pure (inis, Failure es)
-            g (inis, Success x)  = f x >>= \case
-              Left e  -> pure (inis, Failure [CheckError nm e])
-              Right y -> pure (inis, Success y)
-        in cc ((>>= g) <$> uu (runAp go m'))
+      One rdr info ->
+        case findValue rdr info psr of
+          _ -> undefined
+      Optional rdr info ->
+        case findValues rdr info psr of
+          _ -> undefined
+          -- Failure es -> liftErrs es
+          -- Success xM -> Cfg.recordingN rdr info
+          --   $ liftPsr ((Just <$> one xM info rdr) <|> pure Nothing)
+      -- Many rdr@(Reader _psr ppr _dom) info ->
+      --   case findValues rdr (fmap ppr info) _ of
+      --     Failure es -> liftErrs es
+      --     Success xs -> Cfg.recordingN rdr info
+      --       (liftPsr (more info rdr <|> pure xs))
+      -- Some rdr@(Reader _psr ppr _dom) info ->
+      --   case findValues rdr (fmap ppr info) _ of
+      --     Failure es -> liftErrs es
+      --     Success [] -> Cfg.recordingN rdr info
+      --       (liftPsr (ne <$>  some (one Nothing info rdr)))
+      --     Success xs -> Cfg.recordingN rdr info
+      --       (liftPsr (ne <$> (some (one Nothing info rdr) <|> pure xs)))
+      --   where ne = maybe (error "unreachable") (uncurry (NE.:|)) . uncons
+      -- Map rdr@(Reader _psr ppr _dom) info ->
+      --   let info' = (\(k,v) -> k ++ "=" ++ ppr v) <$> info
+      --   in case findValuesMap rdr info' _ of
+      --        Failure es -> liftErrs es
+      --        Success m  -> Cfg.recordingKV rdr info
+      --          (liftPsr (Map.fromList <$> kv info rdr <|> pure m))
+      -- Commands info cmds ->
+      --   case findValue (lookupReader cmds) info _ of
+      --     Failure es                  -> liftErrs es
+      --     Success Nothing             -> flags cmds info
+      --     Success (Just (_, (_, m'))) -> cc (uu (flags cmds info) <|> uu (runAp go m'))
+      -- WithIO nm f m' ->
+      --   let g (inis, Failure es) = pure (inis, Failure es)
+      --       g (inis, Success x)  = f x >>= \case
+      --         Left e  -> pure (inis, Failure [CheckError nm e])
+      --         Right y -> pure (inis, Success y)
+      --   in cc ((>>= g) <$> uu (runAp go m'))
 
     -- Build a command line parser to read a single value.
-    one :: Maybe a -> Info a -> Reader a -> Opt.Parser a
-    one dflt i (Reader psr ppr _dom) =
+    one :: Maybe (Parsed a) -> Info a -> Reader a -> Opt.Parser (Parsed a)
+    one dflt i (Reader psr _dom) =
       Opt.option (Opt.eitherReader psr) $ mconcat $
         (longO i <> shortO i <> helpO i <> metavarO i)
-        : [Opt.value x <> Opt.showDefaultWith ppr | x <- maybeToList dflt]
+        : [Opt.value x <> Opt.showDefaultWith (const s) | x@(Parsed _ s) <- maybeToList dflt]
     -- Build a command line parser that reads at least one value.
-    more :: Info a -> Reader a -> Opt.Parser [a]
-    more i (Reader psr _ppr _dom) = some $
+    more :: Info a -> Reader a -> Opt.Parser [Parsed a]
+    more i (Reader psr _dom) = some $
       Opt.option (Opt.eitherReader psr) $
         longO i <> shortO i <> helpO i <> metavarO i
     -- Build a command line parser that reads any number of values, in a
     -- "<key>=<value>" format.
-    kv :: Info (String, a) -> Reader a -> Opt.Parser [(String, a)]
-    kv i (Reader psr _ppr _dom) = some $
+    kv :: Info (String, a) -> Reader a -> Opt.Parser [(String, Parsed a)]
+    kv i (Reader psr _dom) = some $
       Opt.option (Opt.eitherReader f) $
         longO i <> shortO i <> helpO i <> metavarO i
       where f x = case break (== '=') x of
@@ -186,23 +189,17 @@ mkParserOption psr = go
       , let nm = fromMaybe (printf "%s.%s.%s" (optSection i) (optVariable i) cmdNm) chosenNmMay
       ]
 
--- FIXME: update comments
--- | Attempt to parse a value from an 'Config' file and the environment.
-findValue
-  :: Reader a -> Info String
-  -> P m -> m a
-findValue rdr info p = undefined
-  -- flip (<|>)
-  --   <$> Cfg.findOne cfg rdr info
-  --   <*> Env.findOne envVarPrefix env rdr info
+-- | Parse a single value.
+findValue :: Applicative m => Reader a -> Info a -> P m -> m a
+findValue rdr info p = pOne p rdr info Nothing
+
+findValueMay :: Functor m => Reader a -> Info a -> P m -> m (Maybe a)
+findValueMay rdr info p = pOne p (fmap Just rdr) info (Just Nothing)
 
 -- FIXME: update comments
 -- | Attempt to parse any number of values from an 'Config' file and the
 -- environment.  Supports the _0, _1, etc., and _NONE environment variables.
-findValues
-  :: ConfigIn -> String -> [(String, String)]
-  -> Reader a -> Info String
-  -> P m -> m [a]
+findValues :: Reader a -> Info a -> P m -> m [a]
 findValues rdr info p = undefined
   -- (\x y -> fromMaybe [] (y <|> x))
   --   <$> Cfg.findMany cfg rdr info
@@ -213,10 +210,7 @@ findValues rdr info p = undefined
 -- from an 'Config' file and the environment.  Each environment variable has as its
 -- suffix its key in the key-value.  An empty map can be defined by the _NONE
 -- environment variable.
-findValuesMap
-  :: String -> ConfigIn -> [(String, String)]
-  -> Reader a -> Info String
-  -> P m -> m (Map String a)
+findValuesMap :: Reader a -> Info a -> P m -> m (Map String a)
 findValuesMap rdr info p = undefined
   -- (\x y -> fromMaybe mempty (y <|> x))
   --   <$> Cfg.findMap cfg rdr info

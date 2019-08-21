@@ -7,7 +7,7 @@ module Config.Applicative.Parse.Ini
 
 import Config.Applicative.Info        (Info(..))
 import Config.Applicative.Parse.Types (M(..), P(P), ParseError(..))
-import Config.Applicative.Reader      (Reader(..))
+import Config.Applicative.Reader      (Parsed(..), Reader(..))
 import Config.Applicative.Types
   (Domain(..), Key(..), Sample(..), Validation(..), bindV, section, variable)
 
@@ -31,14 +31,14 @@ parser ini =
 
 findOne
   :: Ini
-  -> Reader a -> Info String
+  -> Reader a -> Info a
   -> Maybe a -> Validation [ParseError] (Maybe a)
-findOne ini rdr@(Reader psr _ppr _dom) info _ =
+findOne ini rdr@(Reader psr _dom) info _ =
   case Ini.lookupArray s v ini of
     Left err  -> undefined
     Right [t] -> case psr (Text.unpack t) of
-      Left err -> undefined
-      Right x  -> pure (Just x)
+      Left err           -> undefined
+      Right (Parsed x _) -> pure (Just x)
     Right [] -> undefined
     Right ts -> undefined
   where
@@ -46,22 +46,22 @@ findOne ini rdr@(Reader psr _ppr _dom) info _ =
 
 findMany
   :: Ini
-  -> Reader a -> Info String
+  -> Reader a -> Info a
   -> Maybe [a] -> Validation [ParseError] (Maybe [a])
-findMany ini rdr@(Reader psr _ppr _dom) info _ =
+findMany ini rdr@(Reader psr _dom) info _ =
   case Ini.lookupArray s v ini of
     Left err  -> undefined
     Right ts -> case traverse (psr . Text.unpack) ts of
       Left err -> undefined
-      Right xs -> pure (Just xs)
+      Right xs -> pure (Just [x | Parsed x _ <- xs])
   where
     (s,v) = sv info
 
 findMap
   :: Ini
-  -> Reader a -> Info String
+  -> Reader a -> Info a
   -> Maybe (Map String a) -> Validation [ParseError] (Maybe (Map String a))
-findMap ini rdr@(Reader psr _ppr _dom) info _ =
+findMap ini rdr@(Reader psr _dom) info _ =
   undefined
   where
     (s,v) = sv info

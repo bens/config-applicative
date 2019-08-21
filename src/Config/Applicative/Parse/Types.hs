@@ -50,11 +50,11 @@ newtype M a
 
 
 data P m = P
-  { pOne  :: forall a. Reader a -> Info String
+  { pOne  :: forall a. Reader a -> Info a
                     -> Maybe a -> m (Maybe a)
-  , pMany :: forall a. Reader a -> Info String
+  , pMany :: forall a. Reader a -> Info a
                     -> Maybe [a] -> m (Maybe [a])
-  , pMap  :: forall a. Reader a -> Info String
+  , pMap  :: forall a. Reader a -> Info a
                     -> Maybe (Map String a) -> m (Maybe (Map String a))
   }
 
