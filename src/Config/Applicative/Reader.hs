@@ -7,6 +7,8 @@ module Config.Applicative.Reader
   , maybeReader, eitherReader, lookupReader
   ) where
 
+import Config.Applicative.Types (Parsed(..))
+
 import Control.Monad (guard, when, (>=>))
 import Data.Bool     (bool)
 import Data.Char     (toLower)
@@ -16,10 +18,6 @@ import Text.Read     (readMaybe)
 
 import qualified Data.Map  as Map
 import qualified Data.Text as Text
-
-data Parsed a
-  = Parsed a String
-    deriving Functor
 
 data Reader a
   = Reader (String -> Either String (Parsed a)) (Maybe [(String, a)])

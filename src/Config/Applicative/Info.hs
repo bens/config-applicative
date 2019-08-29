@@ -6,8 +6,9 @@ module Config.Applicative.Info
   , metavar, value, sample, autoLong
   ) where
 
+import Config.Applicative.Reader (Reader(..))
 import Config.Applicative.Types
-  (Key(..), Metavar(..), Sample(..), section, variable)
+  (Key(..), Metavar(..), Parsed, Sample(..), section, variable)
 
 import Data.Char   (isAlphaNum, toUpper)
 import Data.List   (intercalate)
@@ -23,8 +24,9 @@ data Info a = Info
   , optEnvVar  :: String -> String
   , optHelp    :: Maybe String
   , optMetavar :: Metavar
-  , optValue   :: Maybe a
+  , optValue   :: Maybe (Parsed a)
   , optSample  :: Sample a
+  , optReader  :: Reader a
   } deriving Functor
 
 optSection, optVariable :: Info a -> String
@@ -32,9 +34,9 @@ optSection  = section  . optKey
 optVariable = variable . optKey
 
 -- | Build a minimal 'Info' with section and variable names.
-name :: [String] -> String -> Info a
-name ss v =
-  Info (Key ss v) [] Set.empty envVarNm help' (Metavar "ARG") value' sample'
+name :: [String] -> String -> Reader a -> Info a
+name ss v rdr =
+  Info (Key ss v) [] Set.empty envVarNm help' (Metavar "ARG") value' sample' rdr
   where
     envVarNm prefix =
       map (\x -> if isAlphaNum x || x == '_' then x else '_')
@@ -67,13 +69,22 @@ metavar v i = i{ optMetavar = Metavar v }
 
 -- | Set the default value of this option.  Used as an example value in
 -- generated ini files.
-value :: a -> Info a -> Info a
-value x i = i{ optValue = Just x, optSample = optSample i <> Sample (Just x)}
+value :: String -> Info a -> Info a
+value s i = i
+  { optValue  = Just x
+  , optSample = optSample i <> Sample (Just x)
+  }
+  where
+    Reader psr _ = optReader i
+    Right x = psr s
 
 -- | Set the sample value to use in generated ini files without giving the option a
 -- default.
-sample :: a -> Info a -> Info a
-sample x i = i{ optSample = Sample (Just x) }
+sample :: String -> Info a -> Info a
+sample s i = i{ optSample = Sample (Just x) }
+  where
+    Reader psr _ = optReader i
+    Right x = psr s
 
 -- | Derive the default long command line option from the section and variable
 -- names.

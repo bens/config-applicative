@@ -19,7 +19,8 @@ import Config.Applicative.Info   (Info(..))
 import Config.Applicative.Option (F(..), Option(..))
 import Config.Applicative.Reader (Reader(..))
 import Config.Applicative.Types
-  (Ap, Domain(..), Key(..), Metavar(..), Sample(..), runAp_, section, variable)
+  (Ap, Domain(..), Key(..), Metavar(..), Parsed(Parsed), Sample(..), runAp_,
+  section, variable)
 
 import Data.Bifunctor (second)
 import Data.Function  (on)
@@ -34,12 +35,12 @@ data ExampleValue
     -- field is the domain of values if it is known, the second field is the
     -- defined metavar (defaults to \"ARG\"), and the third is the example value
     -- to display (if any).  An example value supersedes the metavar.
-    MetavarValue    Domain Metavar (Sample String)
+    MetavarValue    Domain Metavar (Maybe String)
     -- | A key-value Map value.
-  | MapMetavarValue Domain Metavar (Sample (String, String))
+  | MapMetavarValue Domain Metavar (Maybe (String, String))
     -- | A Commands value, first item is the names of the commands, second is an
     -- example command value.
-  | CommandsValue [String] (Sample String)
+  | CommandsValue [String] (Maybe String)
     deriving (Eq, Ord, Show)
 
 -- | How many times can this option be repeated?  Informs the documentation
@@ -86,11 +87,11 @@ extractExampleItems envVarPrefix = runAp_ go . getOption
   where
     go :: F a -> [ExampleItem]
     go = \case
-      One      (Reader _psr ppr dom) i -> [exampleItem i (metavarValue    ppr dom i) [] RepeatNo       []]
-      Optional (Reader _psr ppr dom) i -> [exampleItem i (metavarValue    ppr dom i) [] RepeatOptional []]
-      Many     (Reader _psr ppr dom) i -> [exampleItem i (metavarValue    ppr dom i) [] RepeatMany     []]
-      Some     (Reader _psr ppr dom) i -> [exampleItem i (metavarValue    ppr dom i) [] RepeatSome     []]
-      Map      (Reader _psr ppr dom) i -> [exampleItem i (mapMetavarValue ppr dom i) [] RepeatMap      []]
+      One      (Reader _psr dom) i -> [exampleItem i (metavarValue    dom i) [] RepeatNo       []]
+      Optional (Reader _psr dom) i -> [exampleItem i (metavarValue    dom i) [] RepeatOptional []]
+      Many     (Reader _psr dom) i -> [exampleItem i (metavarValue    dom i) [] RepeatMany     []]
+      Some     (Reader _psr dom) i -> [exampleItem i (metavarValue    dom i) [] RepeatSome     []]
+      Map      (Reader _psr dom) i -> [exampleItem i (mapMetavarValue dom i) [] RepeatMap      []]
       Commands i cmds ->
         exampleItem i (commandsValue i cmds) cmds RepeatNo
           (map (second (runAp_ (fmap sv . findInfos) . snd)) cmds)
@@ -98,12 +99,15 @@ extractExampleItems envVarPrefix = runAp_ go . getOption
       WithIO _nm _f m -> extractExampleItems envVarPrefix (Option m)
     exampleItem i v cmds =
       ExampleItem (optKey i) v (names i cmds) (optHelp i)
-    metavarValue ppr dom i =
-      MetavarValue (Domain $ map ppr <$> dom) (optMetavar i) (ppr <$> optSample i)
-    mapMetavarValue ppr dom i =
-      MapMetavarValue (Domain $ map ppr <$> dom) (optMetavar i) (second ppr <$> optSample i)
+    metavarValue dom i =
+      MetavarValue (Domain $ map fst <$> dom) (optMetavar i) $ case optSample i of
+        Sample Nothing             -> Nothing
+        Sample (Just (Parsed _ x)) -> Just x
+        -- (optSample i)
+    mapMetavarValue dom i =
+      MapMetavarValue (Domain $ map fst <$> dom) (optMetavar i) Nothing -- (second ppr <$> optSample i)
     commandsValue i cmds =
-      CommandsValue (map fst cmds) (optSample i)
+      CommandsValue (map fst cmds) Nothing -- (optSample i)
     findInfos :: F a -> [Info ()]
     findInfos = \case
       One      _ i -> [() <$ i]
@@ -192,18 +196,18 @@ formatExampleItems =
           RepeatMap      -> printf "%s_NONE or %s_<key>... environment variables" envvar envvar
     fmtVariable :: String -> ExampleValue -> String
     fmtVariable varName = \case
-      MapMetavarValue _ _ (Sample Nothing)       -> varName ++ ".<key>"
-      MapMetavarValue _ _ (Sample (Just (k, _))) -> varName ++ "." ++ k
-      _                                          -> varName
+      MapMetavarValue _ _ Nothing       -> varName ++ ".<key>"
+      MapMetavarValue _ _ (Just (k, _)) -> varName ++ "." ++ k
+      _                                 -> varName
     -- Output the default definition for the variable.
     fmtValue :: ExampleValue -> String
     fmtValue = \case
-      MetavarValue    _ (Metavar x) (Sample Nothing)        -> printf "<%s>" x
-      MapMetavarValue _ (Metavar x) (Sample Nothing)        -> printf "<%s>" x
-      CommandsValue              xs (Sample Nothing)        -> printf "[%s]" (intercalate "|" xs)
-      MetavarValue    _           _ (Sample (Just d))       -> d
-      MapMetavarValue _           _ (Sample (Just (_k, v))) -> v
-      CommandsValue               _ (Sample (Just d))       -> d
+      MetavarValue    _ (Metavar x) Nothing        -> printf "<%s>" x
+      MapMetavarValue _ (Metavar x) Nothing        -> printf "<%s>" x
+      CommandsValue              xs Nothing        -> printf "[%s]" (intercalate "|" xs)
+      MetavarValue    _           _ (Just d)       -> d
+      MapMetavarValue _           _ (Just (_k, v)) -> v
+      CommandsValue               _ (Just d)       -> d
 
 
 --

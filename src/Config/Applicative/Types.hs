@@ -5,6 +5,7 @@
 module Config.Applicative.Types
   ( Key(..), section, variable
   , Domain(..), Metavar(..), Sample(..)
+  , Parsed(..)
     -- * Free Applicative
  , Ap(..), liftAp, runAp, runAp_
     -- * Validation
@@ -25,6 +26,9 @@ section (Key s _) = intercalate "." s
 variable :: Key -> String
 variable (Key _ v) = v
 
+-- | A value that has been parsed, along with the original string.
+data Parsed a = Parsed a String deriving (Eq, Ord, Show, Functor)
+
 -- | The domain of values of a variable, if known.
 newtype Domain = Domain (Maybe [String]) deriving (Eq, Ord, Show)
 
@@ -32,7 +36,7 @@ newtype Domain = Domain (Maybe [String]) deriving (Eq, Ord, Show)
 newtype Metavar = Metavar String deriving (Eq, Ord, Show)
 
 -- | An optional sample value of an configuration option.
-newtype Sample a = Sample (Maybe a) deriving (Eq, Ord, Show, Functor)
+newtype Sample a = Sample (Maybe (Parsed a)) deriving (Eq, Ord, Show, Functor)
 
 instance Semigroup (Sample a) where
   Sample a <> Sample b = Sample (a <|> b)
