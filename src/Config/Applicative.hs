@@ -14,17 +14,19 @@ module Config.Applicative
   , Inf.Info, Inf.name, Inf.long, Inf.short, Inf.envVar, Inf.help, Inf.metavar
   , Inf.value, Inf.sample
     -- * Reader and Pretty-Printing
-  , Rdr.Reader, Rdr.str, Rdr.text, Rdr.auto, Rdr.boolean, Rdr.enum, Rdr.enumCI
+  , Rdr.Reader(..), Rdr.str, Rdr.text, Rdr.auto, Rdr.boolean, Rdr.enum, Rdr.enumCI
   , Rdr.nonNegative, Rdr.positive, Rdr.password, Rdr.maybeReader, Rdr.eitherReader
-  , Rdr.lookupReader
+  , Rdr.lookupReader, Rdr.iso
     -- * Parsing
   , Psr.ParseError(..), Psr.mkParser
     -- * Example Generation
   , Exa.genExample
     -- * Other
   , Typ.IniVariable(..), Typ.Sample(..), Typ.Domain(..)
+  , Ini
   ) where
 
+import Data.Ini (Ini)
 import qualified Config.Applicative.Example as Exa
 import qualified Config.Applicative.Info    as Inf
 import qualified Config.Applicative.Option  as Opt

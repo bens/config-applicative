@@ -1,6 +1,6 @@
 module Config.Applicative.Reader
   ( Reader(..), str, text, auto, boolean, enum, enumCI, nonNegative, positive, password
-  , maybeReader, eitherReader, lookupReader
+  , maybeReader, eitherReader, lookupReader, iso
   ) where
 
 import Control.Monad (when)
@@ -91,3 +91,7 @@ lookupReader cmds = Reader f fst (Just cmds)
     f x = case x `lookup` cmds of
       Just cmd -> Right (x, cmd)
       Nothing  -> Left ("Bad parse: " ++ show x)
+
+iso :: (a -> b) -> (b -> a) -> Reader b -> Reader a
+iso f g (Reader psr ppr vs) =
+  Reader (fmap g . psr) (ppr . f) (fmap (map g) vs)
